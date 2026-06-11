@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "blaxmankumar/cloud-notes"
-        IMAGE_TAG  = "${BUILD_NUMBER}"
+        BACKEND_IMAGE  = "blaxmankumar/cloud-notes-backend"
+        FRONTEND_IMAGE = "blaxmankumar/cloud-notes-frontend"
+        IMAGE_TAG      = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -42,16 +43,25 @@ pipeline {
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build Backend Image') {
             steps {
                 sh """
-                docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
-                docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+                docker build -t ${BACKEND_IMAGE}:${IMAGE_TAG} ./backend
+                docker tag ${BACKEND_IMAGE}:${IMAGE_TAG} ${BACKEND_IMAGE}:latest
                 """
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Build Frontend Image') {
+            steps {
+                sh """
+                docker build -t ${FRONTEND_IMAGE}:${IMAGE_TAG} ./frontend
+                docker tag ${FRONTEND_IMAGE}:${IMAGE_TAG} ${FRONTEND_IMAGE}:latest
+                """
+            }
+        }
+
+        stage('Push Docker Images') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -60,11 +70,15 @@ pipeline {
                         passwordVariable: 'DOCKER_PASS'
                     )
                 ]) {
+
                     sh """
                     echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
 
-                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
-                    docker push ${IMAGE_NAME}:latest
+                    docker push ${BACKEND_IMAGE}:${IMAGE_TAG}
+                    docker push ${BACKEND_IMAGE}:latest
+
+                    docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}
+                    docker push ${FRONTEND_IMAGE}:latest
 
                     docker logout
                     """
@@ -75,11 +89,13 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 sh """
-                kubectl apply -f k8s/
+                kubectl apply -f deploy/
 
-                kubectl rollout restart deployment cloud-notes
+                kubectl rollout restart deployment/cloud-notes-backend
+                kubectl rollout restart deployment/cloud-notes-frontend
 
-                kubectl rollout status deployment/cloud-notes
+                kubectl rollout status deployment/cloud-notes-backend
+                kubectl rollout status deployment/cloud-notes-frontend
                 """
             }
         }
@@ -88,7 +104,7 @@ pipeline {
     post {
 
         success {
-            echo 'SUCCESS: Pipeline executed successfully.'
+            echo 'SUCCESS: Backend and Frontend deployed successfully!'
         }
 
         failure {
