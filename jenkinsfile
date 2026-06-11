@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = "blaxmankumar/cloud-notes"
-        IMAGE_TAG = "${BUILD_NUMBER}"
+        IMAGE_TAG  = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -12,6 +12,15 @@ pipeline {
             steps {
                 git branch: 'main',
                     url: 'https://github.com/blaxmankumar/cloud-notes.git'
+            }
+        }
+
+        stage('Verify Sonar Scanner') {
+            steps {
+                script {
+                    def scannerHome = tool 'sonar-scanner'
+                    echo "Using Sonar Scanner from: ${scannerHome}"
+                }
             }
         }
 
@@ -25,7 +34,8 @@ pipeline {
                         ${scannerHome}/bin/sonar-scanner \
                           -Dsonar.projectKey=cloud-notes \
                           -Dsonar.projectName=cloud-notes \
-                          -Dsonar.sources=.
+                          -Dsonar.sources=. \
+                          -Dsonar.sourceEncoding=UTF-8
                         """
                     }
                 }
@@ -51,7 +61,7 @@ pipeline {
                     )
                 ]) {
                     sh """
-                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                    echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
 
                     docker push ${IMAGE_NAME}:${IMAGE_TAG}
                     docker push ${IMAGE_NAME}:latest
@@ -66,19 +76,23 @@ pipeline {
             steps {
                 sh """
                 kubectl apply -f k8s/
+
                 kubectl rollout restart deployment cloud-notes
+
+                kubectl rollout status deployment/cloud-notes
                 """
             }
         }
     }
 
     post {
+
         success {
-            echo 'Pipeline executed successfully!'
+            echo 'SUCCESS: Pipeline executed successfully.'
         }
 
         failure {
-            echo 'Pipeline failed. Please check the logs.'
+            echo 'FAILURE: Pipeline execution failed.'
         }
 
         always {
