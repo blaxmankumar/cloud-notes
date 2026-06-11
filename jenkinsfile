@@ -1,0 +1,31 @@
+pipeline {
+    agent any
+
+    tools {
+        sonarQube 'sonar-scanner'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('SonarQube Scan') {
+            steps {
+                withSonarQubeEnv('Sonar') {
+                    sh '''
+                    sonar-scanner \
+                    -Dsonar.projectKey=cloud-notes \
+                    -Dsonar.sources=. \
+                    -Dsonar.host.url=$SONAR_HOST_URL \
+                    -Dsonar.token=$SONAR_AUTH_TOKEN
+                    '''
+                }
+            }
+        }
+
+    }
+}
