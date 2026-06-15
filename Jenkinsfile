@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        BACKEND_IMAGE  = "blaxmankumar/cloud-notes-backend"
-        FRONTEND_IMAGE = "blaxmankumar/cloud-notes-frontend"
+        BACKEND_IMAGE  = "battulalaxmankumar04/cloud-notes-backend"
+        FRONTEND_IMAGE = "battulalaxmankumar04/cloud-notes-frontend"
         IMAGE_TAG      = "${BUILD_NUMBER}"
     }
 
