@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloud-notes-backend
+  namespace: cloud-notes
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloud-notes-backend
+  template:
+    metadata:
+      labels:
+        app: cloud-notes-backend
+    spec:
+      containers:
+      - name: backend
+        image: battulalaxmankumar04/cloud-notes-backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
