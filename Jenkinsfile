@@ -2,9 +2,10 @@ pipeline {
     agent any
 
     environment {
-        BACKEND_IMAGE  = "battulalaxmankumar04/cloud-notes-backend"
+        BACKEND_IMAGE = "battulalaxmankumar04/cloud-notes-backend"
         FRONTEND_IMAGE = "battulalaxmankumar04/cloud-notes-frontend"
-        IMAGE_TAG      = "${BUILD_NUMBER}"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        SONAR_SCANNER = tool 'sonar-scanner'
     }
 
     stages {
@@ -16,48 +17,55 @@ pipeline {
             }
         }
 
-        stage('Verify Sonar Scanner') {
+        stage('Verify Monitoring') {
             steps {
-                script {
-                    def scannerHome = tool 'sonar-scanner'
-                    echo "Using Sonar Scanner from: ${scannerHome}"
-                }
+                sh '''
+                echo "Checking Prometheus..."
+                docker ps | grep prometheus
+
+                echo "Checking Grafana..."
+                docker ps | grep grafana
+
+                echo "Checking Node Exporter..."
+                docker ps | grep node-exporter
+                '''
             }
         }
 
         stage('SonarQube Scan') {
             steps {
-                script {
-                    def scannerHome = tool 'sonar-scanner'
-
-                    withSonarQubeEnv('Sonar') {
-                        sh """
-                        ${scannerHome}/bin/sonar-scanner \
-                          -Dsonar.projectKey=cloud-notes \
-                          -Dsonar.projectName=cloud-notes \
-                          -Dsonar.sources=. \
-                          -Dsonar.sourceEncoding=UTF-8
-                        """
-                    }
+                withSonarQubeEnv('sonarqube') {
+                    sh """
+                    ${SONAR_SCANNER}/bin/sonar-scanner \
+                    -Dsonar.projectKey=cloud-notes \
+                    -Dsonar.projectName=cloud-notes \
+                    -Dsonar.sources=.
+                    """
                 }
             }
         }
 
         stage('Build Backend Image') {
             steps {
-                sh """
-                docker build -t ${BACKEND_IMAGE}:${IMAGE_TAG} ./backend
-                docker tag ${BACKEND_IMAGE}:${IMAGE_TAG} ${BACKEND_IMAGE}:latest
-                """
+                dir('backend') {
+                    sh """
+                    docker build \
+                    -t ${BACKEND_IMAGE}:${IMAGE_TAG} \
+                    -t ${BACKEND_IMAGE}:latest .
+                    """
+                }
             }
         }
 
         stage('Build Frontend Image') {
             steps {
-                sh """
-                docker build -t ${FRONTEND_IMAGE}:${IMAGE_TAG} ./frontend
-                docker tag ${FRONTEND_IMAGE}:${IMAGE_TAG} ${FRONTEND_IMAGE}:latest
-                """
+                dir('frontend') {
+                    sh """
+                    docker build \
+                    -t ${FRONTEND_IMAGE}:${IMAGE_TAG} \
+                    -t ${FRONTEND_IMAGE}:latest .
+                    """
+                }
             }
         }
 
@@ -65,50 +73,55 @@ pipeline {
             steps {
                 withCredentials([
                     usernamePassword(
-                        credentialsId: 'dockerhub-creds',
+                        credentialsId: 'dockerhub',
                         usernameVariable: 'DOCKER_USER',
                         passwordVariable: 'DOCKER_PASS'
                     )
                 ]) {
 
-                    sh """
-                    echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
+                    sh '''
+                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
 
-                    docker push ${BACKEND_IMAGE}:${IMAGE_TAG}
-                    docker push ${BACKEND_IMAGE}:latest
+                    docker push '${BACKEND_IMAGE}':'${IMAGE_TAG}'
+                    docker push '${BACKEND_IMAGE}':latest
 
-                    docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}
-                    docker push ${FRONTEND_IMAGE}:latest
-
-                    docker logout
-                    """
+                    docker push '${FRONTEND_IMAGE}':'${IMAGE_TAG}'
+                    docker push '${FRONTEND_IMAGE}':latest
+                    '''
                 }
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Show Monitoring URLs') {
             steps {
-                sh """
-                kubectl apply -f deploy/
+                echo '''
+==========================================
+Monitoring URLs
 
-                kubectl rollout restart deployment/cloud-notes-backend
-                kubectl rollout restart deployment/cloud-notes-frontend
+Prometheus:
+http://44.202.212.111:9090
 
-                kubectl rollout status deployment/cloud-notes-backend
-                kubectl rollout status deployment/cloud-notes-frontend
-                """
+Grafana:
+http://44.202.212.111:3000
+
+SonarQube:
+http://44.202.212.111:9000
+
+Jenkins:
+http://44.202.212.111:8080
+==========================================
+'''
             }
         }
     }
 
     post {
-
         success {
-            echo 'SUCCESS: Backend and Frontend deployed successfully!'
+            echo "SUCCESS: Build completed successfully."
         }
 
         failure {
-            echo 'FAILURE: Pipeline execution failed.'
+            echo "FAILURE: Pipeline execution failed."
         }
 
         always {
