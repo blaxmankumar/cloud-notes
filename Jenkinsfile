@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     environment {
-        BACKEND_IMAGE = "battulalaxmankumar04/cloud-notes-backend"
-        FRONTEND_IMAGE = "battulalaxmankumar04/cloud-notes-frontend"
         IMAGE_TAG = "${BUILD_NUMBER}"
-        SONAR_SCANNER = tool 'sonar-scanner'
+
+        BACKEND_IMAGE  = "battulalaxmankumar04/cloud-notes-backend"
+        FRONTEND_IMAGE = "battulalaxmankumar04/cloud-notes-frontend"
     }
 
     stages {
@@ -20,14 +20,13 @@ pipeline {
         stage('Verify Monitoring') {
             steps {
                 sh '''
-                echo "Checking Prometheus..."
-                docker ps | grep prometheus
+                    echo "===== Monitoring Status ====="
 
-                echo "Checking Grafana..."
-                docker ps | grep grafana
+                    docker ps | grep prometheus
+                    docker ps | grep grafana
+                    docker ps | grep node-exporter
 
-                echo "Checking Node Exporter..."
-                docker ps | grep node-exporter
+                    echo "Monitoring Containers Running"
                 '''
             }
         }
@@ -35,12 +34,13 @@ pipeline {
         stage('SonarQube Scan') {
             steps {
                 withSonarQubeEnv('sonarqube') {
-                    sh """
-                    ${SONAR_SCANNER}/bin/sonar-scanner \
+
+                    sh '''
+                    /var/lib/jenkins/tools/hudson.plugins.sonar.SonarRunnerInstallation/sonar-scanner/bin/sonar-scanner \
                     -Dsonar.projectKey=cloud-notes \
                     -Dsonar.projectName=cloud-notes \
                     -Dsonar.sources=.
-                    """
+                    '''
                 }
             }
         }
@@ -48,6 +48,7 @@ pipeline {
         stage('Build Backend Image') {
             steps {
                 dir('backend') {
+
                     sh """
                     docker build \
                     -t ${BACKEND_IMAGE}:${IMAGE_TAG} \
@@ -60,6 +61,7 @@ pipeline {
         stage('Build Frontend Image') {
             steps {
                 dir('frontend') {
+
                     sh """
                     docker build \
                     -t ${FRONTEND_IMAGE}:${IMAGE_TAG} \
@@ -69,8 +71,9 @@ pipeline {
             }
         }
 
-        stage('Push Docker Images') {
+        stage('DockerHub Login') {
             steps {
+
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'dockerhub',
@@ -81,50 +84,58 @@ pipeline {
 
                     sh '''
                     echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-
-                    docker push '${BACKEND_IMAGE}':'${IMAGE_TAG}'
-                    docker push '${BACKEND_IMAGE}':latest
-
-                    docker push '${FRONTEND_IMAGE}':'${IMAGE_TAG}'
-                    docker push '${FRONTEND_IMAGE}':latest
                     '''
                 }
             }
         }
 
+        stage('Push Backend Image') {
+            steps {
+
+                sh """
+                docker push ${BACKEND_IMAGE}:${IMAGE_TAG}
+                docker push ${BACKEND_IMAGE}:latest
+                """
+            }
+        }
+
+        stage('Push Frontend Image') {
+            steps {
+
+                sh """
+                docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}
+                docker push ${FRONTEND_IMAGE}:latest
+                """
+            }
+        }
+
         stage('Show Monitoring URLs') {
             steps {
-                echo '''
-==========================================
-Monitoring URLs
 
-Prometheus:
-http://44.202.212.111:9090
-
-Grafana:
-http://44.202.212.111:3000
-
-SonarQube:
-http://44.202.212.111:9000
-
-Jenkins:
-http://44.202.212.111:8080
-==========================================
-'''
+                echo "Prometheus : http://44.202.212.111:9090"
+                echo "Grafana    : http://44.202.212.111:3000"
+                echo "SonarQube  : http://44.202.212.111:9000"
             }
         }
     }
 
     post {
+
         success {
-            echo "SUCCESS: Build completed successfully."
+
+            echo "Pipeline Executed Successfully"
+
+            echo "Backend Image : ${BACKEND_IMAGE}:${IMAGE_TAG}"
+            echo "Frontend Image: ${FRONTEND_IMAGE}:${IMAGE_TAG}"
         }
 
         failure {
-            echo "FAILURE: Pipeline execution failed."
+
+            echo "Pipeline Failed"
         }
 
         always {
+
             cleanWs()
         }
     }
