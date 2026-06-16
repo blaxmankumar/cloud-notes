@@ -1,142 +1,113 @@
 pipeline {
-    agent any
+agent any
 
-    environment {
-        IMAGE_TAG = "${BUILD_NUMBER}"
+environment {
+    REPO_URL = "https://github.com/blaxmankumar/cloud-notes.git"
+    BRANCH = "main"
+    MONITORING_COMPOSE = "monitoring-stack/docker-compose.yml"
+}
 
-        BACKEND_IMAGE  = "battulalaxmankumar04/cloud-notes-backend"
-        FRONTEND_IMAGE = "battulalaxmankumar04/cloud-notes-frontend"
+stages {
+
+    stage('Checkout') {
+        steps {
+            git branch: "${BRANCH}",
+                url: "${REPO_URL}"
+        }
     }
 
-    stages {
+    stage('Check Files') {
+        steps {
+            sh '''
+            pwd
+            ls -la
+            '''
+        }
+    }
 
-        stage('Checkout') {
-            steps {
-                git branch: 'main',
-                    url: 'https://github.com/blaxmankumar/cloud-notes.git'
+    stage('SonarQube Scan') {
+        steps {
+            script {
+                def scannerHome = tool 'SonarScanner'
+
+                withSonarQubeEnv('SonarQube') {
+                    withCredentials([
+                        string(credentialsId: 'sonar-token',
+                               variable: 'SONAR_TOKEN')
+                    ]) {
+
+                        sh """
+                        ${scannerHome}/bin/sonar-scanner \
+                          -Dsonar.projectKey=cloud-notes \
+                          -Dsonar.projectName=cloud-notes \
+                          -Dsonar.sources=. \
+                          -Dsonar.token=$SONAR_TOKEN
+                        """
+                    }
+                }
             }
         }
+    }
 
-        stage('Verify Monitoring') {
-            steps {
+    stage('Create .env') {
+        steps {
+            withCredentials([
+                string(credentialsId: 'db-password',
+                       variable: 'DB_PASS')
+            ]) {
+
                 sh '''
-                    echo "===== Monitoring Status ====="
+                cat > .env <<EOF
+```
 
-                    docker ps | grep prometheus
-                    docker ps | grep grafana
-                    docker ps | grep node-exporter
+DB_HOST=YOUR_RDS_ENDPOINT
+DB_PORT=3306
+DB_USER=admin
+DB_PASSWORD=$DB_PASS
+DB_NAME=cloudnotes
+EOF
+'''
+}
+}
+}
 
-                    echo "Monitoring Containers Running"
-                '''
-            }
-        }
-
-        stage('SonarQube Scan') {
-            steps {
-                withSonarQubeEnv('sonarqube') {
-
-                    sh '''
-                    /var/lib/jenkins/tools/hudson.plugins.sonar.SonarRunnerInstallation/sonar-scanner/bin/sonar-scanner \
-                    -Dsonar.projectKey=cloud-notes \
-                    -Dsonar.projectName=cloud-notes \
-                    -Dsonar.sources=.
-                    '''
-                }
-            }
-        }
-
-        stage('Build Backend Image') {
-            steps {
-                dir('backend') {
-
-                    sh """
-                    docker build \
-                    -t ${BACKEND_IMAGE}:${IMAGE_TAG} \
-                    -t ${BACKEND_IMAGE}:latest .
-                    """
-                }
-            }
-        }
-
-        stage('Build Frontend Image') {
-            steps {
-                dir('frontend') {
-
-                    sh """
-                    docker build \
-                    -t ${FRONTEND_IMAGE}:${IMAGE_TAG} \
-                    -t ${FRONTEND_IMAGE}:latest .
-                    """
-                }
-            }
-        }
-
-        stage('DockerHub Login') {
-            steps {
-
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )
-                ]) {
-
-                    sh '''
-                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                    '''
-                }
-            }
-        }
-
-        stage('Push Backend Image') {
-            steps {
-
-                sh """
-                docker push ${BACKEND_IMAGE}:${IMAGE_TAG}
-                docker push ${BACKEND_IMAGE}:latest
-                """
-            }
-        }
-
-        stage('Push Frontend Image') {
-            steps {
-
-                sh """
-                docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}
-                docker push ${FRONTEND_IMAGE}:latest
-                """
-            }
-        }
-
-        stage('Show Monitoring URLs') {
-            steps {
-
-                echo "Prometheus : http://44.202.212.111:9090"
-                echo "Grafana    : http://44.202.212.111:3000"
-                echo "SonarQube  : http://44.202.212.111:9000"
-            }
+```
+    stage('Deploy Cloud Notes') {
+        steps {
+            sh '''
+            docker compose down || true
+            docker compose up -d --build
+            '''
         }
     }
 
-    post {
-
-        success {
-
-            echo "Pipeline Executed Successfully"
-
-            echo "Backend Image : ${BACKEND_IMAGE}:${IMAGE_TAG}"
-            echo "Frontend Image: ${FRONTEND_IMAGE}:${IMAGE_TAG}"
-        }
-
-        failure {
-
-            echo "Pipeline Failed"
-        }
-
-        always {
-
-            cleanWs()
+    stage('Deploy Monitoring Stack') {
+        steps {
+            sh """
+            docker compose -f ${MONITORING_COMPOSE} down || true
+            docker compose -f ${MONITORING_COMPOSE} up -d
+            """
         }
     }
+
+    stage('Verify Deployment') {
+        steps {
+            sh '''
+            docker ps
+            '''
+        }
+    }
+}
+
+post {
+    success {
+        echo 'Cloud Notes deployed successfully.'
+    }
+
+    failure {
+        echo 'Pipeline failed.'
+    }
+}
+
+
 }
