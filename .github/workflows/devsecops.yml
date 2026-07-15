@@ -1,0 +1,70 @@
+name: Azure DevSecOps Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-devsecops-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_DIRECTORY: terraform/environments/dev
+  TF_VAR_azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  terraform:
+    name: Create Azure Infrastructure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure using OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive terraform
+
+      - name: Terraform initialize
+        working-directory: ${{ env.TERRAFORM_DIRECTORY }}
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        working-directory: ${{ env.TERRAFORM_DIRECTORY }}
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: ${{ env.TERRAFORM_DIRECTORY }}
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform apply
+        if: github.event_name != 'pull_request'
+        working-directory: ${{ env.TERRAFORM_DIRECTORY }}
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Show Terraform outputs
+        if: github.event_name != 'pull_request'
+        working-directory: ${{ env.TERRAFORM_DIRECTORY }}
+        run: terraform output
