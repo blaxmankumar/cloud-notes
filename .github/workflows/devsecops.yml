@@ -31,6 +31,9 @@ env:
   TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
+  # ==================================================
+  # JOB 1: Terraform Azure Infrastructure
+  # ==================================================
   terraform:
     name: Create Azure Infrastructure
     runs-on: ubuntu-latest
@@ -45,12 +48,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # AWS authentication is required because
+      # Terraform state is stored in the AWS S3 backend.
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: github-cloudnotes-terraform
+
+      - name: Verify AWS authentication
+        run: aws sts get-caller-identity
+
       - name: Login to Azure using OIDC
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Azure authentication
+        run: az account show --output table
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -60,7 +78,7 @@ jobs:
       - name: Terraform format check
         run: terraform fmt -check -recursive terraform
 
-      - name: Terraform initialize
+      - name: Terraform initialize with S3 backend
         working-directory: ${{ env.TERRAFORM_DIRECTORY }}
         run: terraform init -input=false
 
@@ -84,6 +102,14 @@ jobs:
           echo "acr_name=$(terraform output -raw acr_name)" >> "$GITHUB_OUTPUT"
           echo "acr_login_server=$(terraform output -raw acr_login_server)" >> "$GITHUB_OUTPUT"
 
+      - name: Verify Terraform state in S3
+        run: |
+          aws s3 ls \
+            s3://cloud-notes-tfstate-038832652205/azure-devsecops/dev/
+
+  # ==================================================
+  # JOB 2: Build, Trivy Scan and Push Docker Images
+  # ==================================================
   build-scan-push:
     name: Build Scan and Push Images
     runs-on: ubuntu-latest
@@ -151,5 +177,8 @@ jobs:
 
       - name: Show pushed image names
         run: |
+          echo "Frontend image:"
           echo "${{ needs.terraform.outputs.acr_login_server }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}"
+
+          echo "Backend image:"
           echo "${{ needs.terraform.outputs.acr_login_server }}/${{ env.BACKEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}"
