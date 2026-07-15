@@ -1,2 +1,17 @@
-.env
-docker-compose.yml.backup
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+!.terraform.lock.hcl
+
+# Node
+**/node_modules/
+**/dist/
+**/build/
+
+# VS Code
+.vscode/
