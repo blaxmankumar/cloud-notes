@@ -21,12 +21,25 @@ concurrency:
 
 env:
   TERRAFORM_DIRECTORY: terraform/environments/dev
-  TF_VAR_azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+  FRONTEND_DIRECTORY: frontend
+  BACKEND_DIRECTORY: backend
+
+  FRONTEND_IMAGE_NAME: cloudnotes-frontend
+  BACKEND_IMAGE_NAME: cloudnotes-backend
+
+  TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
   terraform:
     name: Create Azure Infrastructure
     runs-on: ubuntu-latest
+
+    if: github.event_name != 'pull_request'
+
+    outputs:
+      acr_name: ${{ steps.terraform_outputs.outputs.acr_name }}
+      acr_login_server: ${{ steps.terraform_outputs.outputs.acr_login_server }}
 
     steps:
       - name: Checkout repository
@@ -35,9 +48,9 @@ jobs:
       - name: Login to Azure using OIDC
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -60,11 +73,83 @@ jobs:
         run: terraform plan -input=false -out=tfplan
 
       - name: Terraform apply
-        if: github.event_name != 'pull_request'
         working-directory: ${{ env.TERRAFORM_DIRECTORY }}
         run: terraform apply -input=false -auto-approve tfplan
 
-      - name: Show Terraform outputs
-        if: github.event_name != 'pull_request'
+      - name: Read Terraform outputs
+        id: terraform_outputs
         working-directory: ${{ env.TERRAFORM_DIRECTORY }}
-        run: terraform output
+        shell: bash
+        run: |
+          echo "acr_name=$(terraform output -raw acr_name)" >> "$GITHUB_OUTPUT"
+          echo "acr_login_server=$(terraform output -raw acr_login_server)" >> "$GITHUB_OUTPUT"
+
+  build-scan-push:
+    name: Build Scan and Push Images
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure using OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to Azure Container Registry
+        run: |
+          az acr login \
+            --name "${{ needs.terraform.outputs.acr_name }}"
+
+      - name: Generate image tag
+        id: image_metadata
+        shell: bash
+        run: |
+          echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            --tag "${{ needs.terraform.outputs.acr_login_server }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}" \
+            "${{ env.FRONTEND_DIRECTORY }}"
+
+      - name: Build backend image
+        run: |
+          docker build \
+            --tag "${{ needs.terraform.outputs.acr_login_server }}/${{ env.BACKEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}" \
+            "${{ env.BACKEND_DIRECTORY }}"
+
+      - name: Trivy frontend image scan
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ needs.terraform.outputs.acr_login_server }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+      - name: Trivy backend image scan
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ needs.terraform.outputs.acr_login_server }}/${{ env.BACKEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+      - name: Push frontend image to ACR
+        run: |
+          docker push \
+            "${{ needs.terraform.outputs.acr_login_server }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}"
+
+      - name: Push backend image to ACR
+        run: |
+          docker push \
+            "${{ needs.terraform.outputs.acr_login_server }}/${{ env.BACKEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}"
+
+      - name: Show pushed image names
+        run: |
+          echo "${{ needs.terraform.outputs.acr_login_server }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}"
+          echo "${{ needs.terraform.outputs.acr_login_server }}/${{ env.BACKEND_IMAGE_NAME }}:${{ steps.image_metadata.outputs.tag }}"
