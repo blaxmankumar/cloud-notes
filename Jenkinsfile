@@ -1,118 +1,113 @@
 pipeline {
-    agent any
+agent any
 
-    environment {
-        BACKEND_IMAGE  = "battulalaxmankumar04/cloud-notes-backend"
-        FRONTEND_IMAGE = "battulalaxmankumar04/cloud-notes-frontend"
-        IMAGE_TAG      = "${BUILD_NUMBER}"
+environment {
+    REPO_URL = "https://github.com/blaxmankumar/cloud-notes.git"
+    BRANCH = "main"
+    MONITORING_COMPOSE = "monitoring-stack/docker-compose.yml"
+}
+
+stages {
+
+    stage('Checkout') {
+        steps {
+            git branch: "${BRANCH}",
+                url: "${REPO_URL}"
+        }
     }
 
-    stages {
-
-        stage('Checkout') {
-            steps {
-                git branch: 'main',
-                    url: 'https://github.com/blaxmankumar/cloud-notes.git'
-            }
+    stage('Check Files') {
+        steps {
+            sh '''
+            pwd
+            ls -la
+            '''
         }
+    }
 
-        stage('Verify Sonar Scanner') {
-            steps {
-                script {
-                    def scannerHome = tool 'sonar-scanner'
-                    echo "Using Sonar Scanner from: ${scannerHome}"
-                }
-            }
-        }
+    stage('SonarQube Scan') {
+        steps {
+            script {
+                def scannerHome = tool 'SonarScanner'
 
-        stage('SonarQube Scan') {
-            steps {
-                script {
-                    def scannerHome = tool 'sonar-scanner'
+                withSonarQubeEnv('SonarQube') {
+                    withCredentials([
+                        string(credentialsId: 'sonar-token',
+                               variable: 'SONAR_TOKEN')
+                    ]) {
 
-                    withSonarQubeEnv('Sonar') {
                         sh """
                         ${scannerHome}/bin/sonar-scanner \
                           -Dsonar.projectKey=cloud-notes \
                           -Dsonar.projectName=cloud-notes \
                           -Dsonar.sources=. \
-                          -Dsonar.sourceEncoding=UTF-8
+                          -Dsonar.token=$SONAR_TOKEN
                         """
                     }
                 }
             }
         }
+    }
 
-        stage('Build Backend Image') {
-            steps {
-                sh """
-                docker build -t ${BACKEND_IMAGE}:${IMAGE_TAG} ./backend
-                docker tag ${BACKEND_IMAGE}:${IMAGE_TAG} ${BACKEND_IMAGE}:latest
-                """
-            }
-        }
+    stage('Create .env') {
+        steps {
+            withCredentials([
+                string(credentialsId: 'db-password',
+                       variable: 'DB_PASS')
+            ]) {
 
-        stage('Build Frontend Image') {
-            steps {
-                sh """
-                docker build -t ${FRONTEND_IMAGE}:${IMAGE_TAG} ./frontend
-                docker tag ${FRONTEND_IMAGE}:${IMAGE_TAG} ${FRONTEND_IMAGE}:latest
-                """
-            }
-        }
+                sh '''
+                cat > .env <<EOF
+```
 
-        stage('Push Docker Images') {
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-creds',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )
-                ]) {
+DB_HOST=YOUR_RDS_ENDPOINT
+DB_PORT=3306
+DB_USER=admin
+DB_PASSWORD=$DB_PASS
+DB_NAME=cloudnotes
+EOF
+'''
+}
+}
+}
 
-                    sh """
-                    echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
-
-                    docker push ${BACKEND_IMAGE}:${IMAGE_TAG}
-                    docker push ${BACKEND_IMAGE}:latest
-
-                    docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}
-                    docker push ${FRONTEND_IMAGE}:latest
-
-                    docker logout
-                    """
-                }
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
-            steps {
-                sh """
-                kubectl apply -f deploy/
-
-                kubectl rollout restart deployment/cloud-notes-backend
-                kubectl rollout restart deployment/cloud-notes-frontend
-
-                kubectl rollout status deployment/cloud-notes-backend
-                kubectl rollout status deployment/cloud-notes-frontend
-                """
-            }
+```
+    stage('Deploy Cloud Notes') {
+        steps {
+            sh '''
+            docker compose down || true
+            docker compose up -d --build
+            '''
         }
     }
 
-    post {
-
-        success {
-            echo 'SUCCESS: Backend and Frontend deployed successfully!'
-        }
-
-        failure {
-            echo 'FAILURE: Pipeline execution failed.'
-        }
-
-        always {
-            cleanWs()
+    stage('Deploy Monitoring Stack') {
+        steps {
+            sh """
+            docker compose -f ${MONITORING_COMPOSE} down || true
+            docker compose -f ${MONITORING_COMPOSE} up -d
+            """
         }
     }
+
+    stage('Verify Deployment') {
+        steps {
+            sh '''
+            docker ps
+            '''
+        }
+    }
+}
+
+post {
+    success {
+        echo 'Cloud Notes deployed successfully.'
+    }
+
+    failure {
+        echo 'Pipeline failed.'
+    }
+}
+
+
 }

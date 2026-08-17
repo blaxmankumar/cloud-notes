@@ -3,9 +3,12 @@
 *.tfstate.*
 *.tfplan
 .terraform/
+**/.terraform/*
 *.tfvars
 !terraform.tfvars.example
+!.terraform.lock.hcl
 crash.log
+crash.*.log
 
 # Credentials and secrets
 .env
@@ -18,7 +21,10 @@ credentials
 
 # Application/build output
 node_modules/
+**/node_modules/
 dist/
+**/dist/
+**/build/
 coverage/
 *.log
 .DS_Store
