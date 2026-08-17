@@ -1,0 +1,7 @@
+environment            = "uat"
+application_domain     = "secure-uat.lax-man.in"
+endpoint_domain_prefix = "lax-man-uat"
+
+approved_identity_center_group_id = "REPLACE_ME_UAT_GROUP_UUID"
+alert_email                      = "sammaxi416@gmail.com"
+enable_verified_access           = false

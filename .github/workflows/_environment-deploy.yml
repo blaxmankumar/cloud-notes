@@ -1,0 +1,195 @@
+name: Reusable environment deployment
+
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        required: true
+        type: string
+      state_key:
+        required: true
+        type: string
+      application_domain:
+        required: true
+        type: string
+      endpoint_domain_prefix:
+        required: true
+        type: string
+      variable_prefix:
+        required: true
+        type: string
+      apply_changes:
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-notes-${{ inputs.environment_name }}
+  cancel-in-progress: false
+
+env:
+  TF_ROOT: terraform/environments/dev
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  AWS_REGION: us-east-1
+  TF_STATE_KEY: ${{ inputs.state_key }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_VAR_environment: ${{ inputs.environment_name }}
+  TF_VAR_application_domain: ${{ inputs.application_domain }}
+  TF_VAR_endpoint_domain_prefix: ${{ inputs.endpoint_domain_prefix }}
+  TF_VAR_approved_identity_center_group_id: ${{ vars[format('{0}_APPROVED_IDENTITY_CENTER_GROUP_ID', inputs.variable_prefix)] }}
+  TF_VAR_enable_verified_access: ${{ vars[format('{0}_ENABLE_VERIFIED_ACCESS', inputs.variable_prefix)] || 'false' }}
+  TF_VAR_alert_email: ${{ vars.ALERT_EMAIL || 'sammaxi416@gmail.com' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Terraform format
+        run: terraform fmt -check -recursive terraform
+      - name: Terraform validate
+        run: |
+          terraform -chdir="$TF_ROOT" init -backend=false -input=false
+          terraform -chdir="$TF_ROOT" validate
+      - name: Cedar policy guard checks
+        run: |
+          grep -q 'email.verified == true' policies/group-policy.cedar
+          grep -q 'approved_user_emails_cedar' policies/group-policy.cedar
+          grep -q 'groups has "${approved_identity_center_group_id}"' policies/endpoint-policy.cedar
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 20.19.5
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Backend tests
+        run: |
+          npm --prefix backend ci
+          npm --prefix backend test
+      - name: Frontend build
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+      - name: Dependency audit
+        run: |
+          npm --prefix backend audit --audit-level=high
+          npm --prefix frontend audit --audit-level=high
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Checkov Terraform scan
+        run: |
+          python -m pip install --disable-pip-version-check checkov==3.3.8
+          checkov --directory terraform --framework terraform --compact --soft-fail
+      - name: Trivy secret scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          exit-code: "1"
+          version: 0.72.0
+      - name: Trivy IaC scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: misconfig
+          exit-code: "0"
+          version: 0.72.0
+
+  plan:
+    if: vars.AWS_PLAN_ROLE_ARN != '' && vars.TF_STATE_BUCKET != ''
+    needs: [validate, test, security]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Assume read-only AWS plan role
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-${{ inputs.environment_name }}-plan
+      - name: Terraform plan
+        run: |
+          terraform -chdir="$TF_ROOT" init -input=false \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=$TF_STATE_KEY" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+          terraform -chdir="$TF_ROOT" plan -input=false -out=plan.cache
+          terraform -chdir="$TF_ROOT" show -no-color plan.cache > "$GITHUB_WORKSPACE/plan.txt"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: terraform-plan-${{ inputs.environment_name }}
+          path: |
+            terraform/environments/dev/plan.cache
+            plan.txt
+          retention-days: 1
+
+  deploy:
+    if: ${{ inputs.apply_changes }}
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: terraform-plan-${{ inputs.environment_name }}
+          path: .
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Assume environment deployment role
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ vars[format('{0}_DEPLOY_ROLE_ARN', inputs.variable_prefix)] }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-${{ inputs.environment_name }}-deploy
+      - name: Terraform apply
+        run: |
+          terraform -chdir="$TF_ROOT" init -input=false \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=$TF_STATE_KEY" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+          terraform -chdir="$TF_ROOT" apply -input=false -auto-approve plan.cache
+      - name: Deploy application through SSM
+        env:
+          CI_COMMIT_SHA: ${{ github.sha }}
+          ENVIRONMENT: ${{ inputs.environment_name }}
+        run: bash scripts/deploy-application.sh
+      - name: Verify ALB target health
+        env:
+          ENVIRONMENT: ${{ inputs.environment_name }}
+        run: bash scripts/health-check.sh
+      - name: Verify Verified Access boundary
+        if: vars[format('{0}_ENABLE_VERIFIED_ACCESS', inputs.variable_prefix)] == 'true'
+        run: EXPECTED_STATUS=200,302,401,403 bash scripts/access-test.sh "https://${{ inputs.application_domain }}"

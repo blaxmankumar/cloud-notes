@@ -2,7 +2,7 @@
 # Backend Dockerfile - Node.js + Express
 # ============================================
 
-FROM node:20-alpine
+FROM node:20.19.5-alpine
 
 # Set working directory
 WORKDIR /app
@@ -11,10 +11,14 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install only production dependencies
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 # Copy the rest of the app
 COPY . .
+
+RUN mkdir -p /var/lib/cloud-notes && chown -R node:node /app /var/lib/cloud-notes
+
+USER node
 
 # Expose the API port
 EXPOSE 5000

@@ -1,0 +1,12 @@
+aws_region        = "us-east-1"
+project_name      = "aws-verified-access-zero-trust"
+state_bucket_name = "REPLACE_ME-terraform-state"
+
+enable_github_oidc          = false
+create_github_oidc_provider = true
+
+# Legacy repository subject: repo:OWNER/REPOSITORY
+# GitHub repositories using immutable OIDC subjects must use the exact
+# repo:OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID prefix shown in their token claims.
+github_oidc_subject_prefix = "repo:REPLACE_ME_OWNER/REPLACE_ME_REPOSITORY"
+github_environments        = ["dev", "uat", "prod"]

@@ -1,0 +1,24 @@
+name: Dev deployment
+
+on:
+  push:
+    branches:
+      - develop
+      - "feature/**"
+  pull_request:
+    branches: [develop]
+  workflow_dispatch:
+
+jobs:
+  dev:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_environment-deploy.yml
+    with:
+      environment_name: dev
+      state_key: aws-verified-access-zero-trust/dev/terraform.tfstate
+      application_domain: secure-dev.lax-man.in
+      endpoint_domain_prefix: lax-man-dev
+      variable_prefix: DEV
+      apply_changes: ${{ github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}

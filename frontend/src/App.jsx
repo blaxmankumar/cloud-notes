@@ -194,14 +194,14 @@ function App() {
         <div className="mb-8 animate-fade-in">
           <div className="flex items-center gap-2 text-aws-orange text-sm font-medium mb-2">
             <Sparkles className="w-4 h-4" />
-            <span>AWS Zero to Hero · Episode RDS</span>
+            <span>AWS Verified Access Protected · us-east-1</span>
           </div>
           <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">
-            Production-grade Notes on Amazon RDS
+            Cloud Notes · Zero Trust Protected Application
           </h2>
           <p className="text-aws-muted mt-2 max-w-2xl">
-            A clean full-stack demo showing how your Node.js backend connects to
-            a managed MySQL database. Every note you create lives inside RDS.
+            Authenticated through AWS Verified Access at secure.lax-man.in.
+            Access requires a verified corporate identity and approved group.
           </p>
         </div>
 

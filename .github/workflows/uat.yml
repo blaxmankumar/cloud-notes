@@ -1,0 +1,20 @@
+name: UAT deployment
+
+on:
+  push:
+    branches: [uat]
+  workflow_dispatch:
+
+jobs:
+  uat:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_environment-deploy.yml
+    with:
+      environment_name: uat
+      state_key: aws-verified-access-zero-trust/uat/terraform.tfstate
+      application_domain: secure-uat.lax-man.in
+      endpoint_domain_prefix: lax-man-uat
+      variable_prefix: UAT
+      apply_changes: ${{ github.ref == 'refs/heads/uat' }}

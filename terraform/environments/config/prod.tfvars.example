@@ -1,0 +1,7 @@
+environment            = "prod"
+application_domain     = "secure.lax-man.in"
+endpoint_domain_prefix = "lax-man-prod"
+
+approved_identity_center_group_id = "REPLACE_ME_PROD_GROUP_UUID"
+alert_email                      = "sammaxi416@gmail.com"
+enable_verified_access           = false

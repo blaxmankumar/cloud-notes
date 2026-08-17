@@ -1,0 +1,15 @@
+variable "enabled" { type = bool }
+variable "name_prefix" { type = string }
+variable "application_domain" { type = string }
+variable "endpoint_domain_prefix" { type = string }
+variable "certificate_arn" { type = string }
+variable "alb_arn" { type = string }
+variable "subnet_ids" { type = list(string) }
+variable "security_group_id" { type = string }
+variable "approved_email_domain" { type = string }
+variable "approved_user_emails" { type = list(string) }
+variable "approved_identity_center_group_id" { type = string }
+variable "group_policy_path" { type = string }
+variable "endpoint_policy_path" { type = string }
+variable "cloudwatch_log_group_name" { type = string }
+variable "tags" { type = map(string) }

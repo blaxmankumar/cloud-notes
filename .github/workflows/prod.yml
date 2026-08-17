@@ -1,0 +1,20 @@
+name: Production deployment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  prod:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_environment-deploy.yml
+    with:
+      environment_name: prod
+      state_key: aws-verified-access-zero-trust/prod/terraform.tfstate
+      application_domain: secure.lax-man.in
+      endpoint_domain_prefix: lax-man-prod
+      variable_prefix: PROD
+      apply_changes: ${{ github.ref == 'refs/heads/main' }}
