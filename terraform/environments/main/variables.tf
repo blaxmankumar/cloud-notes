@@ -70,9 +70,14 @@ variable "enable_verified_access" {
   default     = false
   description = "Phase-two switch. Enable only after ACM reports ISSUED and Identity Center prerequisites are complete."
 }
-variable "enable_nat_gateway" {
+variable "free_tier_mode" {
   type        = bool
   default     = true
+  description = "Low-cost learning profile: public t3.micro, no NAT Gateway, ALB, ACM, or Verified Access."
+}
+variable "enable_nat_gateway" {
+  type        = bool
+  default     = false
   description = "Provides private instance egress for bootstrapping and Docker builds; disable only with a pre-baked/offline deployment path."
 }
 variable "vpc_cidr" {
@@ -97,7 +102,7 @@ variable "instance_type" {
 }
 variable "root_volume_size" {
   type    = number
-  default = 16
+  default = 12
 }
 variable "log_retention_days" {
   type    = number

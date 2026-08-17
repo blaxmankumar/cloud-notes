@@ -36,6 +36,23 @@ resource "aws_s3_bucket_versioning" "artifacts" {
   versioning_configuration { status = "Enabled" }
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
+  bucket = aws_s3_bucket.artifacts.id
+
+  rule {
+    id     = "expire-ci-releases"
+    status = "Enabled"
+
+    filter { prefix = "releases/" }
+
+    expiration { days = 7 }
+
+    noncurrent_version_expiration { noncurrent_days = 7 }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.artifacts]
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "artifacts" {
   bucket = aws_s3_bucket.artifacts.id
   rule {
@@ -98,8 +115,8 @@ resource "aws_instance" "this" {
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = [var.security_group_id]
   iam_instance_profile        = aws_iam_instance_profile.this.name
-  associate_public_ip_address = false
-  monitoring                  = true
+  associate_public_ip_address = var.associate_public_ip_address
+  monitoring                  = var.enable_detailed_monitoring
 
   metadata_options {
     http_endpoint               = "enabled"

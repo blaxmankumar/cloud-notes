@@ -16,6 +16,16 @@ if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == "None" ]]; then
   exit 1
 fi
 
+echo "Waiting for SSM agent on $INSTANCE_ID..."
+for _ in $(seq 1 60); do
+  PING_STATUS="$(aws ssm describe-instance-information --region "$AWS_REGION" \
+    --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+    --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)"
+  [[ "$PING_STATUS" == "Online" ]] && break
+  sleep 10
+done
+[[ "${PING_STATUS:-}" == "Online" ]] || { echo "SSM agent did not become online." >&2; exit 1; }
+
 ARTIFACT="/tmp/cloud-notes-${CI_COMMIT_SHA:-local}.tgz"
 tar -C "$ROOT_DIR" --exclude='.git' --exclude='node_modules' --exclude='dist' --exclude='terraform' \
   -czf "$ARTIFACT" backend frontend deploy/docker-compose.aws.yml deploy/nginx-verified-access.conf

@@ -1,29 +1,22 @@
 # Architecture
 
+The default is a cost-controlled learning profile.
+
 ```mermaid
 flowchart TD
-  U[User] --> D[secure.lax-man.in]
-  D -->|external CNAME| VA[AWS Verified Access endpoint<br/>public TLS with ACM]
-  VA --> IDC[IAM Identity Center authentication<br/>organization instance in us-east-1]
-  IDC --> GP{Group Cedar policy<br/>verified domain or email allowlist}
-  GP --> EP{Endpoint Cedar policy<br/>approved group UUID}
-  GP -->|deny| X[Request denied]
-  EP -->|deny| X
-  EP -->|allow HTTP 80| ALB[Internal Application Load Balancer]
-  ALB -->|SG reference, port 8000| EC2[Private EC2<br/>no public IP / no SSH]
+  U[User] -->|HTTP 8000| EC2[Public t3.micro EC2]
   EC2 --> APP[React + Nginx + Node Cloud Notes]
-
-  VA --> LOG[Verified Access OCSF logs]
-  LOG --> CWL[CloudWatch Logs]
-  CWL --> MF[Denied-request metric filter]
-  MF --> CWA[CloudWatch alarms]
-  ALB --> CWA
-  CWA --> SNS[SNS security alerts]
-  SNS --> OPS[Operations team]
+  GHA[GitHub Actions] -->|OIDC, no access keys| AWS[AWS deployment role]
+  AWS --> S3[Private S3 release artifact]
+  AWS -->|SSM Run Command| EC2
+  EC2 --> CWA[CloudWatch EC2 status alarm]
+  CWA --> SNS[SNS email alert]
 ```
 
-Two public and two private subnets span two Availability Zones. “Public subnet” means it has an Internet Gateway route; no application component is placed there except the optional NAT gateway. The internal ALB, Verified Access endpoint attachments, and EC2 instance use private subnets.
+The VPC and Internet Gateway have no hourly charge. The application instance is placed in a public subnet and receives one public IPv4 address so it can reach SSM, package repositories, and container registries without a NAT Gateway. The security group exposes only application port `8000`; SSH is closed. EC2 detailed monitoring is disabled, the encrypted `gp3` root volume is 12 GiB, and CI artifacts expire after seven days.
 
-Traffic is constrained by three security groups: Verified Access may egress only to the ALB on 80; the ALB accepts only that source and may egress only to the app on 8000; EC2 accepts 8000 only from the ALB. EC2 has outbound 80/443 and VPC DNS solely for bootstrap, SSM, and container retrieval.
+`free_tier_mode = true` prevents the default path from creating the major hourly-cost components: NAT Gateway, Application Load Balancer, ACM certificate, and Verified Access. The production modules remain in the repository for a later cost-approved exercise.
 
-One NAT gateway is the default cost/operability compromise. It enables patching and public container-image pulls without exposing EC2. A production HA deployment would use a NAT per AZ; a lower-recurring-cost hardened deployment would use a pre-baked AMI, private ECR, S3 gateway endpoint, and regional interface endpoints before disabling NAT.
+## Security trade-off
+
+The Free Tier URL is public HTTP and does not authenticate the configured email allowlist. Those emails are retained for the later IAM Identity Center and Verified Access phase. Do not store sensitive notes in learning mode. A production deployment should restore private EC2, TLS, ALB, and identity-aware access only after reviewing their recurring cost.
