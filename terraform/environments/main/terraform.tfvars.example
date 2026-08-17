@@ -17,8 +17,10 @@ approved_identity_center_group_id = "REPLACE_ME"
 
 alert_email = "sammaxi416@gmail.com"
 
-# Phase 1: false. Change to true only after ACM is ISSUED.
-enable_verified_access = false
+# Free Tier learning profile. This deliberately omits NAT Gateway, ALB, ACM,
+# and Verified Access because those services can consume credits quickly.
+free_tier_mode = true
 
-# Required for first-boot package/container downloads. See docs/architecture.md.
-enable_nat_gateway = true
+# Keep false in Free Tier mode.
+enable_verified_access = false
+enable_nat_gateway     = false

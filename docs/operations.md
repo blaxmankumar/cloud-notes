@@ -2,10 +2,9 @@
 
 ## Daily and weekly
 
-- Review CloudWatch alarm state, Verified Access denial trends, ALB target health, and unexpected 5XX.
+- Review the CloudWatch EC2 status alarm, application health endpoint, and Free Tier credit balance.
 - Confirm the EC2 SSM managed-node status and apply planned Amazon Linux/container dependency updates.
-- Review certificate expiry/renewal status and leave the ACM validation CNAME intact.
-- Check S3 state/artifact version growth and CloudWatch retention/cost.
+- Check S3 state/artifact growth and current billing forecast. Release artifacts expire after seven days.
 - Weekly, sample denied events and compare them with expected test or threat activity.
 
 ## Access troubleshooting
@@ -22,14 +21,13 @@ Update the protected Terraform variable/source tfvars on a branch. For a group c
 2. Merge to protected `main`.
 3. Review the new main-branch plan artifact.
 4. Authorize the manual `terraform_apply` job.
-5. Observe SSM application deployment and ALB health verification.
-6. Execute approved and denied browser tests when policy or identity changes.
+5. Observe SSM application deployment and public `/health` verification.
+6. Open the Terraform `application_url`; never place sensitive data in Free Tier public mode.
 
 ## Alarm response
 
 - Denials: determine expected tests vs brute force/incorrect assignment; preserve relevant log events.
-- Unhealthy target: inspect Docker and `/health` through SSM, disk space, bootstrap, and SGs.
-- ALB 5XX: inspect ALB reason and listener; target 5XX: inspect redacted Node logs.
+- EC2 status failure: inspect the instance, Docker, disk space, bootstrap, and `/health` through SSM.
 - SNS: confirm receipt and resolution; keep subscriptions current.
 
 ## State recovery

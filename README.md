@@ -1,17 +1,17 @@
-# AWS Verified Access Zero Trust for Cloud Notes
+# Cloud Notes on AWS Free Tier
 
-Production-style AWS infrastructure that protects the existing React/Node Cloud Notes application with AWS Verified Access, IAM Identity Center, and two independent Cedar authorization gates.
+Single-environment AWS learning project for the existing React/Node Cloud Notes application. The default deployment is tuned for this account's Free Tier credit window: one `t3.micro`, a small encrypted EBS volume, private S3 artifacts, SSM deployment, CloudWatch status alarm, and SNS email alerts.
 
-The application is never internet-addressable. Users reach `https://secure.lax-man.in`; Verified Access authenticates with IAM Identity Center, the group policy requires a verified corporate-domain address or an explicitly approved full email, and the endpoint policy requires an immutable Identity Center group ID. Only then can traffic reach the internal ALB and private EC2 target.
+Free Tier mode deliberately does not create a NAT Gateway, Application Load Balancer, ACM certificate, or AWS Verified Access endpoint. These services have hourly charges that can consume Free Tier credits quickly. The application is reachable on the EC2 public address at port `8000`; SSH is not exposed and administration uses SSM.
 
 ## Architecture
 
 ```text
-User -> external DNS CNAME -> Verified Access (TLS + Identity Center + Cedar)
-     -> internal ALB:80 -> private EC2:8000 -> React/Nginx -> Node API
+User -> EC2 public address:8000 -> React/Nginx -> Node API
+GitHub Actions -> AWS OIDC -> S3 artifact -> SSM Run Command -> EC2
 ```
 
-Access logs flow to CloudWatch Logs, a documented OCSF metric filter counts denials, CloudWatch alarms notify an SNS topic, and GitHub Actions deploys through short-lived AWS OIDC credentials. See [architecture](docs/architecture.md) and [access flow](docs/access-flow.md).
+An EC2 status-check alarm notifies an SNS topic, and GitHub Actions deploys through short-lived AWS OIDC credentials. The production Verified Access modules remain available for later study but are disabled by `free_tier_mode = true`. See [architecture](docs/architecture.md).
 
 ## Important application choice
 
@@ -19,18 +19,17 @@ This repository started as the supplied React/Node Cloud Notes application, so i
 
 ## Prerequisites
 
-- AWS account with permissions for VPC, EC2, ELBv2, ACM, Verified Access, CloudWatch, SNS, IAM, S3, SSM, and IAM Identity Center discovery.
-- An **organization instance** of IAM Identity Center enabled in `us-east-1`, with users, verified primary email addresses, and the approved group already present. Terraform discovers it; it never creates or destroys it.
+- AWS account with permissions for VPC, EC2, CloudWatch, SNS, IAM, S3, and SSM. ELBv2, ACM, Verified Access, and IAM Identity Center are needed only if the paid production path is enabled later.
 - Terraform `>= 1.6` or a compatible OpenTofu release. Terraform `>= 1.10` is recommended for native S3 lockfiles.
-- AWS CLI v2, Node.js 20, npm, Bash, Docker for local application work, and an externally managed DNS zone for `lax-man.in`.
+- AWS CLI v2, Node.js 20, npm, Bash, and Docker for local application work.
 - GitHub repository with protected `main`, a matching `main` GitHub Environment, repository variables, and AWS OIDC trust configured.
 
 ## Values you must provide
 
 Copy `terraform/environments/main/terraform.tfvars.example` to `terraform.tfvars` and replace:
 
-- Stage-specific approved Identity Center group IDs: immutable UUIDs shown by IAM Identity Center.
-- `approved_user_emails`: explicit verified Identity Center emails allowed in addition to the corporate domain.
+- Keep `free_tier_mode = true`, `enable_nat_gateway = false`, and `enable_verified_access = false`.
+- `approved_user_emails` remains recorded for the later Verified Access phase; it is not an authentication mechanism in public Free Tier mode.
 - `alert_email`: defaults to `sammaxi416@gmail.com`; use `""` to omit the subscription.
 - `state_bucket_name` in bootstrap configuration.
 - `github_oidc_subject_prefix`: exact GitHub token subject prefix for your repository.
@@ -62,9 +61,9 @@ Map the outputs to GitHub Actions repository variables:
 
 Bootstrap runs with local state by design. Secure that small state file, then configure the emitted bucket in `terraform/environments/main/backend.tf.example` or GitHub repository variables. S3 versioning, encryption, public-access blocking, TLS-only access, and native S3 lockfiles are used. See [GitHub Actions setup](docs/github-actions.md) and [implementation](docs/implementation.md).
 
-### 2. Phase 1: infrastructure and certificate request
+### 2. Deploy the Free Tier learning infrastructure
 
-Leave `enable_verified_access = false` and initialize the main environment backend with the bucket created above:
+Keep `free_tier_mode = true`, `enable_nat_gateway = false`, and `enable_verified_access = false`, then initialize the main backend:
 
 ```bash
 cp terraform/environments/main/terraform.tfvars.example terraform/environments/main/terraform.tfvars
@@ -75,14 +74,14 @@ terraform -chdir=terraform/environments/main init \
   -backend-config="region=us-east-1" \
   -backend-config="use_lockfile=true"
 terraform -chdir=terraform/environments/main apply
-terraform -chdir=terraform/environments/main output acm_dns_validation_records
+terraform -chdir=terraform/environments/main output application_url
 ```
 
-Create the output ACM validation CNAME at the external DNS provider. Wait until ACM reports `ISSUED`. Terraform does not change external DNS and deliberately does not use `aws_acm_certificate_validation`, which would block while the record is absent.
+The output URL uses the instance's public IPv4 address and port `8000`. The address may change after an EC2 stop/start. Do not enable NAT, ALB, or Verified Access while the goal is to minimize credit usage.
 
-### 3. Phase 2: Verified Access
+### 3. Optional paid production phase
 
-Confirm Identity Center prerequisites, set the real group UUID and `enable_verified_access = true`, then apply again. Create the final CNAME only after `verified_access_endpoint_domain` is populated:
+After the learning phase, set `free_tier_mode = false` only after reviewing an AWS cost estimate. The production path can then use ACM, an internal ALB, IAM Identity Center, and Verified Access.
 
 ```text
 secure.lax-man.in CNAME <verified_access_endpoint_domain>
@@ -90,10 +89,7 @@ secure.lax-man.in CNAME <verified_access_endpoint_domain>
 
 Exact instructions are in [DNS records](docs/dns-records.md) and [Identity Center](docs/identity-center.md).
 
-The three explicitly approved Gmail users must each exist in IAM Identity
-Center, have a verified primary email, and be members of the group identified
-by that stage's `*_APPROVED_IDENTITY_CENTER_GROUP_ID`. The email allowlist does not bypass the
-separate group-membership policy.
+The three explicitly approved Gmail users must exist in IAM Identity Center before the paid Verified Access path can enforce the allowlist. Free Tier mode does not claim to authenticate an email address.
 
 ### 4. Deploy the existing application
 
@@ -104,7 +100,7 @@ AWS_REGION=us-east-1 bash scripts/deploy-application.sh
 bash scripts/health-check.sh
 ```
 
-The script uploads a versioned source artifact to private S3 and uses SSM Run Command—never SSH—to build and start the containers.
+The script uploads a short-lived versioned source artifact to private S3 and uses SSM Run Command—never SSH—to build and start the containers.
 
 ## GitHub Actions pipeline
 
@@ -115,8 +111,7 @@ Create these GitHub **Actions repository variables**:
 - `AWS_PLAN_ROLE_ARN` (read-only repository-scoped OIDC role used by pull requests)
 - `TF_STATE_BUCKET`
 - `MAIN_DEPLOY_ROLE_ARN`
-- `MAIN_APPROVED_IDENTITY_CENTER_GROUP_ID`
-- `MAIN_ENABLE_VERIFIED_ACCESS` (`false` in phase 1, `true` in phase 2)
+- `MAIN_ENABLE_VERIFIED_ACCESS` (`false` while Free Tier mode is active)
 - `ALERT_EMAIL` (`sammaxi416@gmail.com`)
 
 In GitHub Settings → Environments, create `main`, restrict it to the `main` branch, and add a reviewer when supported. No AWS access key is stored in GitHub.

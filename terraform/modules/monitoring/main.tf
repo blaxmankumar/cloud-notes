@@ -1,11 +1,12 @@
 resource "aws_cloudwatch_log_group" "verified_access" {
+  count             = var.enable_verified_access_monitoring ? 1 : 0
   name              = var.log_group_name
   retention_in_days = var.log_retention_days
   tags              = var.tags
 }
 
 resource "aws_sns_topic" "alerts" {
-  name = "verified-access-security-alerts"
+  name = "${var.name_prefix}-alerts"
   tags = var.tags
 }
 
@@ -17,8 +18,9 @@ resource "aws_sns_topic_subscription" "email" {
 }
 
 resource "aws_cloudwatch_log_metric_filter" "verified_access_denied" {
+  count          = var.enable_verified_access_monitoring ? 1 : 0
   name           = "VerifiedAccessDeniedRequests"
-  log_group_name = aws_cloudwatch_log_group.verified_access.name
+  log_group_name = aws_cloudwatch_log_group.verified_access[0].name
   pattern        = "{ $.activity_id = \"2\" }"
 
   metric_transformation {
@@ -48,7 +50,7 @@ locals {
 }
 
 resource "aws_cloudwatch_metric_alarm" "alb" {
-  for_each            = local.alarms
+  for_each            = var.enable_alb_alarms ? local.alarms : {}
   alarm_name          = "${var.name_prefix}-${each.key}"
   alarm_description   = "Operational alarm for ${each.key}"
   namespace           = each.value.namespace
@@ -67,6 +69,7 @@ resource "aws_cloudwatch_metric_alarm" "alb" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "verified_access_denied" {
+  count               = var.enable_verified_access_monitoring ? 1 : 0
   alarm_name          = "${var.name_prefix}-verified-access-denied"
   alarm_description   = "Verified Access denied requests exceeded the configured threshold"
   namespace           = "Security/VerifiedAccess"
@@ -82,4 +85,22 @@ resource "aws_cloudwatch_metric_alarm" "verified_access_denied" {
   tags                = var.tags
 
   depends_on = [aws_cloudwatch_log_metric_filter.verified_access_denied]
+}
+
+resource "aws_cloudwatch_metric_alarm" "ec2_status" {
+  count               = var.enable_ec2_alarm ? 1 : 0
+  alarm_name          = "${var.name_prefix}-ec2-status-check"
+  alarm_description   = "Application EC2 instance failed an AWS status check"
+  namespace           = "AWS/EC2"
+  metric_name         = "StatusCheckFailed"
+  dimensions          = { InstanceId = var.instance_id }
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+  tags                = var.tags
 }

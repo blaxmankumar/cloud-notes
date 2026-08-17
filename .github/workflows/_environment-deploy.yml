@@ -41,6 +41,8 @@ env:
   TF_VAR_endpoint_domain_prefix: ${{ inputs.endpoint_domain_prefix }}
   TF_VAR_approved_identity_center_group_id: ${{ vars[format('{0}_APPROVED_IDENTITY_CENTER_GROUP_ID', inputs.variable_prefix)] }}
   TF_VAR_enable_verified_access: ${{ vars[format('{0}_ENABLE_VERIFIED_ACCESS', inputs.variable_prefix)] || 'false' }}
+  TF_VAR_free_tier_mode: "true"
+  TF_VAR_enable_nat_gateway: "false"
   TF_VAR_alert_email: ${{ vars.ALERT_EMAIL || 'sammaxi416@gmail.com' }}
 
 jobs:
@@ -186,7 +188,7 @@ jobs:
           CI_COMMIT_SHA: ${{ github.sha }}
           ENVIRONMENT: ${{ inputs.environment_name }}
         run: bash scripts/deploy-application.sh
-      - name: Verify ALB target health
+      - name: Verify application health
         env:
           ENVIRONMENT: ${{ inputs.environment_name }}
         run: bash scripts/health-check.sh
