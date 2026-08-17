@@ -23,18 +23,18 @@ This repository started as the supplied React/Node Cloud Notes application, so i
 - An **organization instance** of IAM Identity Center enabled in `us-east-1`, with users, verified primary email addresses, and the approved group already present. Terraform discovers it; it never creates or destroys it.
 - Terraform `>= 1.6` or a compatible OpenTofu release. Terraform `>= 1.10` is recommended for native S3 lockfiles.
 - AWS CLI v2, Node.js 20, npm, Bash, Docker for local application work, and an externally managed DNS zone for `lax-man.in`.
-- GitHub repository with protected `dev`, `uat`, and `prod` promotion branches; matching GitHub Environments; repository variables; and AWS OIDC trust configured.
+- GitHub repository with protected `main`, a matching `main` GitHub Environment, repository variables, and AWS OIDC trust configured.
 
 ## Values you must provide
 
-Copy `terraform/environments/dev/terraform.tfvars.example` to `terraform.tfvars` and replace:
+Copy `terraform/environments/main/terraform.tfvars.example` to `terraform.tfvars` and replace:
 
 - Stage-specific approved Identity Center group IDs: immutable UUIDs shown by IAM Identity Center.
 - `approved_user_emails`: explicit verified Identity Center emails allowed in addition to the corporate domain.
 - `alert_email`: defaults to `sammaxi416@gmail.com`; use `""` to omit the subscription.
 - `state_bucket_name` in bootstrap configuration.
 - `github_oidc_subject_prefix`: exact GitHub token subject prefix for your repository.
-- `github_environments`: keep `dev`, `uat`, and `prod` unless GitHub Environment names are intentionally changed.
+- `github_environments`: keep `["main"]` for this learning setup.
 
 Do not commit `.tfvars`, credentials, tokens, state, private keys, or identity JWTs.
 
@@ -58,26 +58,24 @@ Map the outputs to GitHub Actions repository variables:
 
 - `state_bucket_name` -> `TF_STATE_BUCKET`
 - `github_plan_role_arn` -> `AWS_PLAN_ROLE_ARN`
-- `github_deploy_role_arns["dev"]` -> `DEV_DEPLOY_ROLE_ARN`
-- `github_deploy_role_arns["uat"]` -> `UAT_DEPLOY_ROLE_ARN`
-- `github_deploy_role_arns["prod"]` -> `PROD_DEPLOY_ROLE_ARN`
+- `github_deploy_role_arns["main"]` -> `MAIN_DEPLOY_ROLE_ARN`
 
-Bootstrap runs with local state by design. Secure that small state file, then configure the emitted bucket in `terraform/environments/dev/backend.tf.example` or GitHub repository variables. S3 versioning, encryption, public-access blocking, TLS-only access, and native S3 lockfiles are used. See [GitHub Actions setup](docs/github-actions.md) and [implementation](docs/implementation.md).
+Bootstrap runs with local state by design. Secure that small state file, then configure the emitted bucket in `terraform/environments/main/backend.tf.example` or GitHub repository variables. S3 versioning, encryption, public-access blocking, TLS-only access, and native S3 lockfiles are used. See [GitHub Actions setup](docs/github-actions.md) and [implementation](docs/implementation.md).
 
 ### 2. Phase 1: infrastructure and certificate request
 
-The following is a Dev local example. Dev, UAT, and Prod use the same reviewed Terraform composition but independent variables, resource names, and S3 state keys. Leave `enable_verified_access = false` and initialize the partial backend with the bucket created above:
+Leave `enable_verified_access = false` and initialize the main environment backend with the bucket created above:
 
 ```bash
-cp terraform/environments/dev/terraform.tfvars.example terraform/environments/dev/terraform.tfvars
+cp terraform/environments/main/terraform.tfvars.example terraform/environments/main/terraform.tfvars
 export TF_STATE_BUCKET="the-bucket-created-by-bootstrap"
-terraform -chdir=terraform/environments/dev init \
+terraform -chdir=terraform/environments/main init \
   -backend-config="bucket=$TF_STATE_BUCKET" \
-  -backend-config="key=aws-verified-access-zero-trust/dev/terraform.tfstate" \
+  -backend-config="key=aws-verified-access-zero-trust/main/terraform.tfstate" \
   -backend-config="region=us-east-1" \
   -backend-config="use_lockfile=true"
-terraform -chdir=terraform/environments/dev apply
-terraform -chdir=terraform/environments/dev output acm_dns_validation_records
+terraform -chdir=terraform/environments/main apply
+terraform -chdir=terraform/environments/main output acm_dns_validation_records
 ```
 
 Create the output ACM validation CNAME at the external DNS provider. Wait until ACM reports `ISSUED`. Terraform does not change external DNS and deliberately does not use `aws_acm_certificate_validation`, which would block while the record is absent.
@@ -99,7 +97,7 @@ separate group-membership policy.
 
 ### 4. Deploy the existing application
 
-GitHub Actions runs `scripts/deploy-application.sh` after the protected `dev` environment approval and Terraform apply. For an authorized local operator:
+GitHub Actions runs `scripts/deploy-application.sh` after the protected `main` environment approval and Terraform apply. For an authorized local operator:
 
 ```bash
 AWS_REGION=us-east-1 bash scripts/deploy-application.sh
@@ -110,27 +108,27 @@ The script uploads a versioned source artifact to private S3 and uses SSM Run Co
 
 ## GitHub Actions pipeline
 
-The promotion path is `feature/* -> dev -> uat -> prod`. Separate [Dev](.github/workflows/dev.yml), [UAT](.github/workflows/uat.yml), and [Prod](.github/workflows/prod.yml) workflows call one reusable pipeline. Every stage has an independent state key, domain, GitHub Environment, and OIDC deployment role. See [environment strategy](docs/environments.md) and [GitHub Actions setup](docs/github-actions.md).
+The learning path is `feature/* -> main`. The [Main workflow](.github/workflows/main.yml) calls one reusable pipeline for validation, tests, security scans, plan, approved apply, deployment, and verification. See [environment strategy](docs/environments.md) and [GitHub Actions setup](docs/github-actions.md).
 
 Create these GitHub **Actions repository variables**:
 
 - `AWS_PLAN_ROLE_ARN` (read-only repository-scoped OIDC role used by pull requests)
 - `TF_STATE_BUCKET`
-- `DEV_DEPLOY_ROLE_ARN`, `UAT_DEPLOY_ROLE_ARN`, `PROD_DEPLOY_ROLE_ARN`
-- `DEV_APPROVED_IDENTITY_CENTER_GROUP_ID`, `UAT_APPROVED_IDENTITY_CENTER_GROUP_ID`, `PROD_APPROVED_IDENTITY_CENTER_GROUP_ID`
-- `DEV_ENABLE_VERIFIED_ACCESS`, `UAT_ENABLE_VERIFIED_ACCESS`, `PROD_ENABLE_VERIFIED_ACCESS` (`false` in phase 1, `true` in phase 2)
+- `MAIN_DEPLOY_ROLE_ARN`
+- `MAIN_APPROVED_IDENTITY_CENTER_GROUP_ID`
+- `MAIN_ENABLE_VERIFIED_ACCESS` (`false` in phase 1, `true` in phase 2)
 - `ALERT_EMAIL` (`sammaxi416@gmail.com`)
 
-In GitHub Settings → Environments, create `dev`, `uat`, and `prod`. Restrict them to the same-named branch; require approval for UAT and Prod. No AWS access key is stored in GitHub.
+In GitHub Settings → Environments, create `main`, restrict it to the `main` branch, and add a reviewer when supported. No AWS access key is stored in GitHub.
 
 ## Testing
 
 ```bash
 npm --prefix backend ci && npm --prefix backend test
 npm --prefix frontend ci && npm --prefix frontend run build
-terraform -chdir=terraform/environments/dev fmt -check -recursive
-terraform -chdir=terraform/environments/dev init -backend=false
-terraform -chdir=terraform/environments/dev validate
+terraform -chdir=terraform/environments/main fmt -check -recursive
+terraform -chdir=terraform/environments/main init -backend=false
+terraform -chdir=terraform/environments/main validate
 ```
 
 Identity-based ALLOW/DENY cases require real users and browser login, so they are controlled semi-automated tests. See [testing](docs/testing.md) and the case files under `tests/`.
@@ -149,8 +147,8 @@ Use `scripts/rollback.sh <bad-commit>` to create a reviewable `git revert`; it n
 Before destroy, retain anything required from the file-backed store and empty the versioned application artifact bucket. Disable Verified Access/DNS first, review the destroy plan, then:
 
 ```bash
-terraform -chdir=terraform/environments/dev plan -destroy
-terraform -chdir=terraform/environments/dev destroy
+terraform -chdir=terraform/environments/main plan -destroy
+terraform -chdir=terraform/environments/main destroy
 ```
 
 The organization Identity Center instance and external DNS records are never destroyed by Terraform.

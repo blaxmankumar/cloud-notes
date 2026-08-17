@@ -3,7 +3,7 @@ set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
 PROJECT_NAME="${PROJECT_NAME:-aws-verified-access-zero-trust}"
-ENVIRONMENT="${ENVIRONMENT:-dev}"
+ENVIRONMENT="${ENVIRONMENT:-main}"
 
 NAME_BASE="${PROJECT_NAME}-${ENVIRONMENT}"
 TARGET_GROUP_NAME="${NAME_BASE:0:28}-app"

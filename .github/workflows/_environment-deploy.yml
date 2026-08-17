@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TF_ROOT: terraform/environments/dev
+  TF_ROOT: terraform/environments/main
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
   AWS_REGION: us-east-1
@@ -145,7 +145,7 @@ jobs:
         with:
           name: terraform-plan-${{ inputs.environment_name }}
           path: |
-            terraform/environments/dev/plan.cache
+            terraform/environments/main/plan.cache
             plan.txt
           retention-days: 1
 

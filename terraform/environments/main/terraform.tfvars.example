@@ -1,10 +1,10 @@
 aws_region = "us-east-1"
 
-environment  = "dev"
+environment  = "main"
 project_name = "aws-verified-access-zero-trust"
 
-application_domain     = "secure-dev.lax-man.in"
-endpoint_domain_prefix = "lax-man-dev"
+application_domain     = "secure.lax-man.in"
+endpoint_domain_prefix = "lax-man-main"
 base_domain        = "lax-man.in"
 
 approved_email_domain             = "magnitglobal.com"

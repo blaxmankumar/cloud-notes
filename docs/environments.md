@@ -1,62 +1,43 @@
-# Dev, UAT, and production environments
+# Single main environment
 
-The repository uses one Terraform composition and shared modules for all three
-environments. The workflow supplies the environment name, domain, and state key,
-so infrastructure code stays identical while state and AWS resources remain
-separate.
+The learning setup intentionally has one environment named `main`.
 
-| Stage | Promotion branch | GitHub workflow | Domain | Terraform state key |
+| Environment | Branch | Workflow | Domain | Terraform state key |
 | --- | --- | --- | --- | --- |
-| Dev | `dev` | `dev.yml` | `secure-dev.lax-man.in` | `aws-verified-access-zero-trust/dev/terraform.tfstate` |
-| UAT | `uat` | `uat.yml` | `secure-uat.lax-man.in` | `aws-verified-access-zero-trust/uat/terraform.tfstate` |
-| Prod | `prod` | `prod.yml` | `secure.lax-man.in` | `aws-verified-access-zero-trust/prod/terraform.tfstate` |
+| Main | `main` | `main.yml` | `secure.lax-man.in` | `aws-verified-access-zero-trust/main/terraform.tfstate` |
 
-The three stage workflows call `_environment-deploy.yml`. That reusable
-workflow contains the common validation, tests, security scans, Terraform plan,
-approved apply, SSM application deployment, and health verification. This gives
-each stage an independent trigger without copying the deployment logic.
+The entry workflow calls `_environment-deploy.yml`, which contains validation,
+tests, security scans, Terraform plan, approved apply, SSM application
+deployment, and health verification.
 
-## Promotion model
+## Simple learning flow
 
 ```text
-feature/* --pull request--> dev --pull request--> uat --pull request--> prod
-                              Dev                       UAT                    Prod
+feature/* --pull request--> main --environment approval--> AWS
 ```
 
-1. Work only on a `feature/*` branch. A feature push and a pull request to
-   `dev` validate and plan Dev but never apply.
-2. Merging into `dev` deploys Dev.
-3. Open a pull request from `dev` to `uat`. Merging deploys UAT after the
-   `uat` GitHub Environment approval.
-4. After UAT acceptance, open a pull request from `uat` to `prod`. Merging
-   deploys production after the `prod` GitHub Environment approval.
+Feature pushes and pull requests validate and plan but never apply. Merging to
+`main` runs a new plan and waits for approval on the GitHub `main` Environment
+before making AWS changes.
 
-Do not merge feature branches directly into `uat` or `prod`. Protect all three
-promotion branches and require the matching workflow checks.
+## Isolation
 
-## Isolation model
+- One S3 state object and lock file.
+- One GitHub OIDC deployment role for the `main` Environment.
+- One VPC, ALB, EC2 instance, certificate, Verified Access endpoint, log group,
+  alarm set, and artifact bucket.
 
-- Separate S3 state object and lock file per stage.
-- Resource names and tags contain `dev`, `uat`, or `prod`.
-- Separate VPC, ALB, EC2 instance, certificate, Verified Access endpoint, logs,
-  alarms, and application artifact bucket per stage.
-- Separate GitHub OIDC deployment role per GitHub Environment.
-- One read-only repository-scoped plan role.
+The email allowlist still requires each user to have a verified IAM Identity
+Center email and membership in the approved group.
 
-The same explicit email allowlist is used by default in every stage. Use a
-different immutable IAM Identity Center group UUID for each stage if possible.
-Every allowed user still needs both a verified email and membership in the
-stage's approved group.
+## Local plan
 
-## Local environment plan
-
-Copy only the environment you need; generated `.tfvars` files are ignored by
-Git:
+Copy the example; generated `.tfvars` files are ignored by Git:
 
 ```bash
-cp terraform/environments/config/dev.tfvars.example terraform/environments/config/dev.tfvars
-ENVIRONMENT=dev TF_STATE_BUCKET=your-state-bucket bash scripts/deploy.sh
+cp terraform/environments/config/main.tfvars.example terraform/environments/config/main.tfvars
+ENVIRONMENT=main TF_STATE_BUCKET=your-state-bucket bash scripts/deploy.sh
 ```
 
-Replace `dev` with `uat` or `prod`. Always review the selected environment and
-state key in the Terraform output before typing `APPLY`.
+Always confirm the environment and state key before approving a Terraform
+apply.

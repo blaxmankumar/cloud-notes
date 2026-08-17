@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TF_DIR="$ROOT_DIR/terraform/environments/dev"
+TF_DIR="$ROOT_DIR/terraform/environments/main"
 
 terraform -chdir="$TF_DIR" fmt -check -recursive
 terraform -chdir="$TF_DIR" init -backend=false -input=false

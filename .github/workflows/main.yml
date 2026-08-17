@@ -1,0 +1,24 @@
+name: Main deployment
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  main:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_environment-deploy.yml
+    with:
+      environment_name: main
+      state_key: aws-verified-access-zero-trust/main/terraform.tfstate
+      application_domain: secure.lax-man.in
+      endpoint_domain_prefix: lax-man-main
+      variable_prefix: MAIN
+      apply_changes: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}

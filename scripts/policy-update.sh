@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TF_DIR="$ROOT_DIR/terraform/environments/dev"
-ENVIRONMENT="${ENVIRONMENT:-dev}"
+TF_DIR="$ROOT_DIR/terraform/environments/main"
+ENVIRONMENT="${ENVIRONMENT:-main}"
 : "${TF_STATE_BUCKET:?Set TF_STATE_BUCKET to the bootstrapped S3 state bucket name}"
 : "${APPROVED_EMAIL_DOMAIN:?Set APPROVED_EMAIL_DOMAIN}"
 : "${APPROVED_IDENTITY_CENTER_GROUP_ID:?Set APPROVED_IDENTITY_CENTER_GROUP_ID}"

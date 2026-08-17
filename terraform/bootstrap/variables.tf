@@ -37,7 +37,7 @@ variable "github_oidc_subject_prefix" {
 }
 variable "github_environments" {
   type    = set(string)
-  default = ["dev", "uat", "prod"]
+  default = ["main"]
   validation {
     condition = length(var.github_environments) > 0 && alltrue([
       for environment in var.github_environments : can(regex("^[a-z0-9-]+$", environment))

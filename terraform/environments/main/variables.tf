@@ -8,7 +8,7 @@ variable "aws_region" {
 }
 variable "environment" {
   type    = string
-  default = "dev"
+  default = "main"
 }
 variable "project_name" {
   type    = string
@@ -59,7 +59,7 @@ variable "alert_email" {
 }
 variable "endpoint_domain_prefix" {
   type    = string
-  default = "lax-man-secure"
+  default = "lax-man-main"
   validation {
     condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", var.endpoint_domain_prefix))
     error_message = "endpoint_domain_prefix must be a lowercase DNS label."

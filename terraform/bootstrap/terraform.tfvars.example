@@ -9,4 +9,4 @@ create_github_oidc_provider = true
 # GitHub repositories using immutable OIDC subjects must use the exact
 # repo:OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID prefix shown in their token claims.
 github_oidc_subject_prefix = "repo:REPLACE_ME_OWNER/REPLACE_ME_REPOSITORY"
-github_environments        = ["dev", "uat", "prod"]
+github_environments        = ["main"]
