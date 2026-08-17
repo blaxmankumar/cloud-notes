@@ -23,7 +23,7 @@ This repository started as the supplied React/Node Cloud Notes application, so i
 - An **organization instance** of IAM Identity Center enabled in `us-east-1`, with users, verified primary email addresses, and the approved group already present. Terraform discovers it; it never creates or destroys it.
 - Terraform `>= 1.6` or a compatible OpenTofu release. Terraform `>= 1.10` is recommended for native S3 lockfiles.
 - AWS CLI v2, Node.js 20, npm, Bash, Docker for local application work, and an externally managed DNS zone for `lax-man.in`.
-- GitHub repository with protected `develop`, `uat`, and `main` promotion branches; matching `dev`, `uat`, and `prod` GitHub Environments; repository variables; and AWS OIDC trust configured.
+- GitHub repository with protected `dev`, `uat`, and `prod` promotion branches; matching GitHub Environments; repository variables; and AWS OIDC trust configured.
 
 ## Values you must provide
 
@@ -110,7 +110,7 @@ The script uploads a versioned source artifact to private S3 and uses SSM Run Co
 
 ## GitHub Actions pipeline
 
-The promotion path is `feature/* -> develop -> uat -> main`. Separate [Dev](.github/workflows/dev.yml), [UAT](.github/workflows/uat.yml), and [Prod](.github/workflows/prod.yml) workflows call one reusable pipeline. Every stage has an independent state key, domain, GitHub Environment, and OIDC deployment role. See [environment strategy](docs/environments.md) and [GitHub Actions setup](docs/github-actions.md).
+The promotion path is `feature/* -> dev -> uat -> prod`. Separate [Dev](.github/workflows/dev.yml), [UAT](.github/workflows/uat.yml), and [Prod](.github/workflows/prod.yml) workflows call one reusable pipeline. Every stage has an independent state key, domain, GitHub Environment, and OIDC deployment role. See [environment strategy](docs/environments.md) and [GitHub Actions setup](docs/github-actions.md).
 
 Create these GitHub **Actions repository variables**:
 
@@ -121,7 +121,7 @@ Create these GitHub **Actions repository variables**:
 - `DEV_ENABLE_VERIFIED_ACCESS`, `UAT_ENABLE_VERIFIED_ACCESS`, `PROD_ENABLE_VERIFIED_ACCESS` (`false` in phase 1, `true` in phase 2)
 - `ALERT_EMAIL` (`sammaxi416@gmail.com`)
 
-In GitHub Settings → Environments, create `dev`, `uat`, and `prod`. Restrict them to `develop`, `uat`, and `main` respectively; require approval for UAT and Prod. No AWS access key is stored in GitHub.
+In GitHub Settings → Environments, create `dev`, `uat`, and `prod`. Restrict them to the same-named branch; require approval for UAT and Prod. No AWS access key is stored in GitHub.
 
 ## Testing
 

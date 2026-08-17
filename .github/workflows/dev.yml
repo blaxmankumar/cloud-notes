@@ -3,10 +3,10 @@ name: Dev deployment
 on:
   push:
     branches:
-      - develop
+      - dev
       - "feature/**"
   pull_request:
-    branches: [develop]
+    branches: [dev]
   workflow_dispatch:
 
 jobs:
@@ -21,4 +21,4 @@ jobs:
       application_domain: secure-dev.lax-man.in
       endpoint_domain_prefix: lax-man-dev
       variable_prefix: DEV
-      apply_changes: ${{ github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+      apply_changes: ${{ github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}

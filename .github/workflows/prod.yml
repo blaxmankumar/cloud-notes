@@ -2,7 +2,7 @@ name: Production deployment
 
 on:
   push:
-    branches: [main]
+    branches: [prod]
   workflow_dispatch:
 
 jobs:
@@ -17,4 +17,4 @@ jobs:
       application_domain: secure.lax-man.in
       endpoint_domain_prefix: lax-man-prod
       variable_prefix: PROD
-      apply_changes: ${{ github.ref == 'refs/heads/main' }}
+      apply_changes: ${{ github.ref == 'refs/heads/prod' }}

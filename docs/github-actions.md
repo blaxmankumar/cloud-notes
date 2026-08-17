@@ -56,9 +56,9 @@ or Terraform state in GitHub variables.
 
 In **Settings -> Environments**, create:
 
-- `dev`: deployment branch `develop`; reviewer optional.
+- `dev`: deployment branch `dev`; reviewer optional.
 - `uat`: deployment branch `uat`; at least one required reviewer.
-- `prod`: deployment branch `main`; required reviewer and the strictest wait or
+- `prod`: deployment branch `prod`; required reviewer and the strictest wait or
   approval rules available to the repository.
 
 The matching AWS role trusts only its GitHub Environment OIDC subject. Plan runs
@@ -67,7 +67,7 @@ deployment, and verification run together in one approved environment job.
 
 ## 4. Configure branch protection
 
-Create `develop` and `uat`, then protect `develop`, `uat`, and `main`. Require a
+Create `dev`, `uat`, and `prod`, then protect all three branches. Require a
 pull request, prevent force pushes, and require the matching workflow checks.
 Use the promotion sequence documented in [environments](environments.md).
 

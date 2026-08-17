@@ -7,9 +7,9 @@ separate.
 
 | Stage | Promotion branch | GitHub workflow | Domain | Terraform state key |
 | --- | --- | --- | --- | --- |
-| Dev | `develop` | `dev.yml` | `secure-dev.lax-man.in` | `aws-verified-access-zero-trust/dev/terraform.tfstate` |
+| Dev | `dev` | `dev.yml` | `secure-dev.lax-man.in` | `aws-verified-access-zero-trust/dev/terraform.tfstate` |
 | UAT | `uat` | `uat.yml` | `secure-uat.lax-man.in` | `aws-verified-access-zero-trust/uat/terraform.tfstate` |
-| Prod | `main` | `prod.yml` | `secure.lax-man.in` | `aws-verified-access-zero-trust/prod/terraform.tfstate` |
+| Prod | `prod` | `prod.yml` | `secure.lax-man.in` | `aws-verified-access-zero-trust/prod/terraform.tfstate` |
 
 The three stage workflows call `_environment-deploy.yml`. That reusable
 workflow contains the common validation, tests, security scans, Terraform plan,
@@ -19,19 +19,19 @@ each stage an independent trigger without copying the deployment logic.
 ## Promotion model
 
 ```text
-feature/* --pull request--> develop --pull request--> uat --pull request--> main
+feature/* --pull request--> dev --pull request--> uat --pull request--> prod
                               Dev                       UAT                    Prod
 ```
 
 1. Work only on a `feature/*` branch. A feature push and a pull request to
-   `develop` validate and plan Dev but never apply.
-2. Merging into `develop` deploys Dev.
-3. Open a pull request from `develop` to `uat`. Merging deploys UAT after the
+   `dev` validate and plan Dev but never apply.
+2. Merging into `dev` deploys Dev.
+3. Open a pull request from `dev` to `uat`. Merging deploys UAT after the
    `uat` GitHub Environment approval.
-4. After UAT acceptance, open a pull request from `uat` to `main`. Merging
+4. After UAT acceptance, open a pull request from `uat` to `prod`. Merging
    deploys production after the `prod` GitHub Environment approval.
 
-Do not merge feature branches directly into `uat` or `main`. Protect all three
+Do not merge feature branches directly into `uat` or `prod`. Protect all three
 promotion branches and require the matching workflow checks.
 
 ## Isolation model
