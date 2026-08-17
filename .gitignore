@@ -1,17 +1,32 @@
 # Terraform
-**/.terraform/*
 *.tfstate
 *.tfstate.*
 *.tfplan
+.terraform/
+**/.terraform/*
+*.tfvars
+!terraform.tfvars.example
+!.terraform.lock.hcl
 crash.log
 crash.*.log
 
-!.terraform.lock.hcl
+# Credentials and secrets
+.env
+.env.*
+!.env.example
+credentials
+*.pem
+*.key
+*.p12
 
-# Node
+# Application/build output
+node_modules/
 **/node_modules/
+dist/
 **/dist/
 **/build/
-
-# VS Code
+coverage/
+*.log
+.DS_Store
+.idea/
 .vscode/

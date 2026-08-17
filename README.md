@@ -1,543 +1,162 @@
-# ☁️ Cloud Notes App — Amazon RDS Demo
+# AWS Verified Access Zero Trust for Cloud Notes
 
-> A production-style full-stack demo for the **AWS Zero to Hero** YouTube series.
-> Teaches Amazon RDS the real-infrastructure way: a Node.js + Express API connects to a managed MySQL database, and a React + Tailwind dashboard lets you create, view, and delete notes.
+Production-style AWS infrastructure that protects the existing React/Node Cloud Notes application with AWS Verified Access, IAM Identity Center, and two independent Cedar authorization gates.
 
-**YouTube channel:** [Madhukar Reddy — @awsandevops](https://youtube.com/@awsandevops)
+The application is never internet-addressable. Users reach `https://secure.lax-man.in`; Verified Access authenticates with IAM Identity Center, the group policy requires a verified corporate-domain address or an explicitly approved full email, and the endpoint policy requires an immutable Identity Center group ID. Only then can traffic reach the internal ALB and private EC2 target.
 
----
+## Architecture
 
-## 📋 Table of Contents
-
-1. [What you'll learn](#-what-youll-learn)
-2. [Architecture](#-architecture)
-3. [Folder structure](#-folder-structure)
-4. [Tech stack](#-tech-stack)
-5. [Run with Docker (recommended)](#-run-with-docker-recommended)
-6. [Local testing without Docker](#-local-testing-without-docker)
-7. [AWS RDS setup](#-aws-rds-setup)
-8. [Deploying to EC2](#-deploying-to-ec2)
-9. [API reference](#-api-reference)
-10. [Security reminders](#-security-reminders)
-11. [Troubleshooting](#-troubleshooting)
-
----
-
-## 🎯 What you'll learn
-
-- How to provision an Amazon RDS MySQL instance
-- How a Node.js backend connects to RDS using `mysql2`
-- How to use environment variables for credentials (never hardcode!)
-- How to expose a clean REST API with Express
-- How to build a modern dashboard UI with React + Tailwind
-- How to deploy the stack on EC2 and lock down RDS with security groups
-
----
-
-## 🏗 Architecture
-
-```
-                  Internet
-                     │ HTTPS (443)
-                     ▼
-        ┌─────────────────────────────┐
-        │  EC2 (Ubuntu 22.04)         │
-        │                             │
-        │  Host Nginx (SSL termination)│
-        │       │                     │       ┌──────────────────┐
-        │       ├─▶ frontend (Docker) │       │ Amazon RDS       │
-        │       └─▶ backend  (Docker) │──────▶│ MySQL 8.0        │
-        │              :5000 (local)  │ 3306  │ Private endpoint │
-        └─────────────────────────────┘       └──────────────────┘
+```text
+User -> external DNS CNAME -> Verified Access (TLS + Identity Center + Cedar)
+     -> internal ALB:80 -> private EC2:8000 -> React/Nginx -> Node API
 ```
 
-The browser hits the host's Nginx over HTTPS. Nginx terminates SSL and reverse-proxies to the two Docker containers (both bound to localhost only). The backend container talks to RDS over the private VPC subnet on port 3306.
+Access logs flow to CloudWatch Logs, a documented OCSF metric filter counts denials, CloudWatch alarms notify an SNS topic, and GitHub Actions deploys through short-lived AWS OIDC credentials. See [architecture](docs/architecture.md) and [access flow](docs/access-flow.md).
 
----
+## Important application choice
 
-## 📁 Folder structure
+This repository started as the supplied React/Node Cloud Notes application, so it intentionally uses that application instead of replacing it with the Flask sample mentioned in the baseline. AWS deployment defaults to a file-backed note store on the encrypted EC2 EBS volume, avoiding RDS cost. The original MySQL mode remains available with `DB_MODE=mysql` and the `DB_*` settings. The single-instance file store is suitable for this demo, not a horizontally scaled production data tier.
 
-```
-cloud-notes-app/
-├── docker-compose.yml       # Brings up the whole stack
-├── .env.example             # Root env file for Docker Compose
-│
-├── backend/
-│   ├── server.js            # Express app + routes
-│   ├── db.js                # MySQL connection pool + helpers
-│   ├── Dockerfile           # Backend container image
-│   ├── .dockerignore
-│   ├── package.json
-│   ├── .env.example         # Used only for non-Docker local runs
-│   └── .gitignore
-│
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx          # Main dashboard component
-│   │   ├── main.jsx         # React entry point
-│   │   └── index.css        # Tailwind + custom styles
-│   ├── public/
-│   │   └── cloud.svg        # Favicon
-│   ├── Dockerfile           # Multi-stage: builds React, serves with Nginx
-│   ├── nginx.conf           # Inside-container Nginx (static files only)
-│   ├── .dockerignore
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.js       # Proxies /api to backend (dev mode only)
-│   ├── tailwind.config.js
-│   ├── postcss.config.js
-│   └── .gitignore
-│
-├── deploy/
-│   ├── nginx-host.conf      # Production Nginx config for EC2 host
-│   └── ec2-setup.sh         # One-shot EC2 provisioning script
-│
-└── README.md
-```
+## Prerequisites
 
----
+- AWS account with permissions for VPC, EC2, ELBv2, ACM, Verified Access, CloudWatch, SNS, IAM, S3, SSM, and IAM Identity Center discovery.
+- An **organization instance** of IAM Identity Center enabled in `us-east-1`, with users, verified primary email addresses, and the approved group already present. Terraform discovers it; it never creates or destroys it.
+- Terraform `>= 1.6` or a compatible OpenTofu release. Terraform `>= 1.10` is recommended for native S3 lockfiles.
+- AWS CLI v2, Node.js 20, npm, Bash, Docker for local application work, and an externally managed DNS zone for `lax-man.in`.
+- GitHub repository with protected `main`, a matching `main` GitHub Environment, repository variables, and AWS OIDC trust configured.
 
-## 🛠 Tech stack
+## Values you must provide
 
-| Layer       | Technology                          |
-| ----------- | ----------------------------------- |
-| Frontend    | React 18 + Vite + Tailwind CSS      |
-| Icons       | lucide-react                        |
-| Backend     | Node.js + Express                   |
-| DB driver   | mysql2 (promise-based)              |
-| Database    | Amazon RDS — MySQL 8.0              |
-| Config      | dotenv                              |
-| Deployment  | EC2 (Amazon Linux 2023 or Ubuntu)   |
+Copy `terraform/environments/main/terraform.tfvars.example` to `terraform.tfvars` and replace:
 
----
+- Stage-specific approved Identity Center group IDs: immutable UUIDs shown by IAM Identity Center.
+- `approved_user_emails`: explicit verified Identity Center emails allowed in addition to the corporate domain.
+- `alert_email`: defaults to `sammaxi416@gmail.com`; use `""` to omit the subscription.
+- `state_bucket_name` in bootstrap configuration.
+- `github_oidc_subject_prefix`: exact GitHub token subject prefix for your repository.
+- `github_environments`: keep `["main"]` for this learning setup.
 
-## 🐳 Run with Docker (recommended)
+Do not commit `.tfvars`, credentials, tokens, state, private keys, or identity JWTs.
 
-This is the easiest way — one command, no Node.js install required on your machine.
+## Deployment
 
-### Prerequisites
+### 1. Bootstrap remote state and GitHub Actions OIDC
 
-- Docker Desktop (Mac/Windows) or Docker Engine + Docker Compose (Linux) — [install](https://docs.docker.com/get-docker/)
-- An Amazon RDS MySQL instance (see [next section](#-aws-rds-setup))
-
-### 1. Configure the environment
-
-From the project root:
+Copy the example, choose a globally unique state bucket, set
+`enable_github_oidc = true`, and replace `github_oidc_subject_prefix` with the
+exact subject prefix for this repository before applying:
 
 ```bash
-cp .env.example .env
-nano .env
+cd terraform/bootstrap
+cp terraform.tfvars.example terraform.tfvars
+terraform init
+terraform apply
+terraform output
 ```
 
-Fill in your RDS details:
+Map the outputs to GitHub Actions repository variables:
 
-```env
-DB_HOST=cloudnotes-db.xxxxx.ap-south-1.rds.amazonaws.com
-DB_PORT=3306
-DB_USER=admin
-DB_PASSWORD=YourStrongPasswordHere
-DB_NAME=cloudnotes
-```
+- `state_bucket_name` -> `TF_STATE_BUCKET`
+- `github_plan_role_arn` -> `AWS_PLAN_ROLE_ARN`
+- `github_deploy_role_arns["main"]` -> `MAIN_DEPLOY_ROLE_ARN`
 
-### 2. Bring up the stack
+Bootstrap runs with local state by design. Secure that small state file, then configure the emitted bucket in `terraform/environments/main/backend.tf.example` or GitHub repository variables. S3 versioning, encryption, public-access blocking, TLS-only access, and native S3 lockfiles are used. See [GitHub Actions setup](docs/github-actions.md) and [implementation](docs/implementation.md).
+
+### 2. Phase 1: infrastructure and certificate request
+
+Leave `enable_verified_access = false` and initialize the main environment backend with the bucket created above:
 
 ```bash
-docker compose up --build
+cp terraform/environments/main/terraform.tfvars.example terraform/environments/main/terraform.tfvars
+export TF_STATE_BUCKET="the-bucket-created-by-bootstrap"
+terraform -chdir=terraform/environments/main init \
+  -backend-config="bucket=$TF_STATE_BUCKET" \
+  -backend-config="key=aws-verified-access-zero-trust/main/terraform.tfstate" \
+  -backend-config="region=us-east-1" \
+  -backend-config="use_lockfile=true"
+terraform -chdir=terraform/environments/main apply
+terraform -chdir=terraform/environments/main output acm_dns_validation_records
 ```
 
-That's it. Docker will:
+Create the output ACM validation CNAME at the external DNS provider. Wait until ACM reports `ISSUED`. Terraform does not change external DNS and deliberately does not use `aws_acm_certificate_validation`, which would block while the record is absent.
 
-- Build the backend image (`node:20-alpine` + Express)
-- Build the frontend image (multi-stage: React build → Nginx serve)
-- Create a private bridge network so frontend can reach backend
-- Start both containers
+### 3. Phase 2: Verified Access
 
-You should see logs like:
+Confirm Identity Center prerequisites, set the real group UUID and `enable_verified_access = true`, then apply again. Create the final CNAME only after `verified_access_endpoint_domain` is populated:
 
-```
-cloudnotes-backend  | 🚀 Starting Cloud Notes App Backend...
-cloudnotes-backend  | ✅ Connected to RDS: cloudnotes-db.****.ap-south-1.rds.amazonaws.com
-cloudnotes-backend  | ✅ Notes table ready
-cloudnotes-backend  | ✅ Server running on http://localhost:5000
-cloudnotes-frontend | Configuration complete; ready for start up
+```text
+secure.lax-man.in CNAME <verified_access_endpoint_domain>
 ```
 
-Open **http://localhost:3000** in your browser — the dashboard loads, connects to RDS, you're done.
+Exact instructions are in [DNS records](docs/dns-records.md) and [Identity Center](docs/identity-center.md).
 
-> The backend API is at **http://localhost:5000**. Both ports bind to `127.0.0.1` only, so they're only reachable from your machine. On EC2, host Nginx fronts both behind a single HTTPS endpoint — see [Deploying to EC2](#-deploying-to-ec2-with-your-own-domain--https).
+The three explicitly approved Gmail users must each exist in IAM Identity
+Center, have a verified primary email, and be members of the group identified
+by that stage's `*_APPROVED_IDENTITY_CENTER_GROUP_ID`. The email allowlist does not bypass the
+separate group-membership policy.
 
-### 3. Useful Docker commands
+### 4. Deploy the existing application
+
+GitHub Actions runs `scripts/deploy-application.sh` after the protected `main` environment approval and Terraform apply. For an authorized local operator:
 
 ```bash
-# Run in background (detached mode)
-docker compose up -d --build
-
-# View logs
-docker compose logs -f
-docker compose logs -f backend       # backend only
-
-# Stop everything
-docker compose down
-
-# Rebuild after code changes
-docker compose up --build --force-recreate
-
-# Shell into a container
-docker exec -it cloudnotes-backend sh
+AWS_REGION=us-east-1 bash scripts/deploy-application.sh
+bash scripts/health-check.sh
 ```
 
-### How it works locally
+The script uploads a versioned source artifact to private S3 and uses SSM Run Command—never SSH—to build and start the containers.
 
-```
-┌─────────────────────────────────────────────────────┐
-│  Your machine                                       │
-│                                                     │
-│  Browser ──▶ http://localhost:3000                  │
-│                       │                             │
-│                       ▼                             │
-│  ┌─────────────────────────┐    ┌────────────────┐  │
-│  │ frontend                │    │ backend        │  │      ┌──────────────┐
-│  │ (nginx:alpine)          │───▶│ (node:alpine)  │──┼─────▶│ Amazon RDS   │
-│  │ 127.0.0.1:3000          │    │ 127.0.0.1:5000 │  │ 3306 │ MySQL 8.0    │
-│  │ serves React + /api/*   │    │                │  │      └──────────────┘
-│  └─────────────────────────┘    └────────────────┘  │
-│                                                     │
-│            cloudnotes-net (bridge)                  │
-└─────────────────────────────────────────────────────┘
-```
+## GitHub Actions pipeline
 
-- Open `http://localhost:3000` — the frontend container serves the React app and proxies `/api/*` to the backend over the internal Docker network (`backend:5000`).
-- Both host ports bind to `127.0.0.1` only — nothing is exposed to your local network.
-- On EC2, **host Nginx** sits in front and handles SSL + domain routing, hitting the same two containers.
+The learning path is `feature/* -> main`. The [Main workflow](.github/workflows/main.yml) calls one reusable pipeline for validation, tests, security scans, plan, approved apply, deployment, and verification. See [environment strategy](docs/environments.md) and [GitHub Actions setup](docs/github-actions.md).
 
----
+Create these GitHub **Actions repository variables**:
 
-## 💻 Local testing without Docker
+- `AWS_PLAN_ROLE_ARN` (read-only repository-scoped OIDC role used by pull requests)
+- `TF_STATE_BUCKET`
+- `MAIN_DEPLOY_ROLE_ARN`
+- `MAIN_APPROVED_IDENTITY_CENTER_GROUP_ID`
+- `MAIN_ENABLE_VERIFIED_ACCESS` (`false` in phase 1, `true` in phase 2)
+- `ALERT_EMAIL` (`sammaxi416@gmail.com`)
 
-Prefer running the services directly with Node? Here's the manual path.
+In GitHub Settings → Environments, create `main`, restrict it to the `main` branch, and add a reviewer when supported. No AWS access key is stored in GitHub.
 
-### Prerequisites
-
-- Node.js 18+ ([install](https://nodejs.org/))
-- An Amazon RDS MySQL instance (see [next section](#-aws-rds-setup))
-- Your laptop's IP added to the RDS security group inbound rules
-
-### 1. Clone & install
+## Testing
 
 ```bash
-git clone <your-repo-url>
-cd cloud-notes-app
-
-# Backend
-cd backend
-npm install
-
-# Frontend (in a new terminal)
-cd ../frontend
-npm install
+npm --prefix backend ci && npm --prefix backend test
+npm --prefix frontend ci && npm --prefix frontend run build
+terraform -chdir=terraform/environments/main fmt -check -recursive
+terraform -chdir=terraform/environments/main init -backend=false
+terraform -chdir=terraform/environments/main validate
 ```
 
-### 2. Configure backend
+Identity-based ALLOW/DENY cases require real users and browser login, so they are controlled semi-automated tests. See [testing](docs/testing.md) and the case files under `tests/`.
+
+## Monitoring and operations
+
+- Verified Access OCSF 0.1 logs: `/aws/verified-access/lax-man-in`, 30-day configurable retention, trust context disabled.
+- Alarms: unhealthy target, ALB 5XX, target 5XX, and `VerifiedAccessDeniedRequests`.
+- SNS: `verified-access-security-alerts`; email remains pending until the recipient confirms it.
+- Daily operations, alarm response, certificate checks, policy review, and state recovery: [operations](docs/operations.md).
+
+## Rollback and destroy
+
+Use `scripts/rollback.sh <bad-commit>` to create a reviewable `git revert`; it never resets a branch or destroys infrastructure. Push the revert and run the normal plan/manual apply/verify flow. Application, policy, failed-deployment, and emergency procedures are in [rollback](docs/rollback.md).
+
+Before destroy, retain anything required from the file-backed store and empty the versioned application artifact bucket. Disable Verified Access/DNS first, review the destroy plan, then:
 
 ```bash
-cd backend
-cp .env.example .env
+terraform -chdir=terraform/environments/main plan -destroy
+terraform -chdir=terraform/environments/main destroy
 ```
 
-Edit `.env` with your RDS details:
+The organization Identity Center instance and external DNS records are never destroyed by Terraform.
 
-```env
-DB_HOST=cloudnotes-db.xxxxx.ap-south-1.rds.amazonaws.com
-DB_PORT=3306
-DB_USER=admin
-DB_PASSWORD=YourStrongPasswordHere
-DB_NAME=cloudnotes
-PORT=5000
-```
+## Cost and security notes
 
-### 3. Run it
+Cost-generating resources include Verified Access endpoint usage, one internal ALB, one `t3.micro`, EBS, one NAT gateway plus data, CloudWatch Logs/metrics, S3 storage, and SNS email delivery. No RDS, EKS, ECS, WAF, or CloudFront is created. The NAT gateway is genuinely used for first-boot packages and Docker image pulls; set `enable_nat_gateway=false` only with a pre-baked AMI/offline artifact strategy.
 
-```bash
-# Terminal 1 — backend
-cd backend
-npm start
-```
+The ALB is internal, EC2 has no public IP, there is no SSH rule or key pair, IMDSv2 is mandatory, EBS and S3 are encrypted, and application ingress is security-group-to-security-group only. `/identity` returns only allowlisted decoded claims and labels them unverified; do not make application authorization decisions from those claims without validating the Verified Access signature.
 
-You should see:
-
-```
-🚀 Starting Cloud Notes App Backend...
-✅ Connected to RDS: cloudnotes-db.****.ap-south-1.rds.amazonaws.com
-✅ Notes table ready
-✅ Server running on http://localhost:5000
-```
-
-```bash
-# Terminal 2 — frontend
-cd frontend
-npm run dev
-```
-
-Open **http://localhost:3000** — you should see the dashboard with a green "Connected" badge.
-
----
-
-## ☁️ AWS RDS setup
-
-### Step 1: Create the RDS instance
-
-1. Open the AWS Console → **RDS** → **Create database**
-2. Choose:
-   - Engine: **MySQL** (8.0.x)
-   - Template: **Free tier** (for the demo)
-   - DB instance identifier: `cloudnotes-db`
-   - Master username: `admin`
-   - Master password: pick a strong one — save it!
-3. **Connectivity:**
-   - VPC: default
-   - Public access: **No** (we'll connect through EC2 — production-safe)
-   - For local testing only, you can temporarily set this to **Yes** and add your IP
-   - VPC security group: create new, name it `rds-cloudnotes-sg`
-4. **Additional configuration:**
-   - Initial database name: `cloudnotes`
-5. Click **Create database** and wait ~5 minutes.
-
-### Step 2: Configure the security group
-
-Edit `rds-cloudnotes-sg` inbound rules:
-
-| Type       | Protocol | Port | Source                            |
-| ---------- | -------- | ---- | --------------------------------- |
-| MySQL/Aurora | TCP      | 3306 | The EC2 security group ID         |
-| MySQL/Aurora | TCP      | 3306 | Your laptop IP (only for testing) |
-
-**Never** open 3306 to `0.0.0.0/0` in production.
-
-### Step 3: Get the endpoint
-
-RDS → Databases → `cloudnotes-db` → **Connectivity & security** tab. Copy the **Endpoint** (looks like `cloudnotes-db.xxxxx.ap-south-1.rds.amazonaws.com`) into your `.env`.
-
-### Step 4: SQL fallback (if auto-create fails)
-
-The backend will auto-create the `notes` table on startup. If you'd rather create it manually, connect via MySQL client:
-
-```bash
-mysql -h cloudnotes-db.xxxxx.ap-south-1.rds.amazonaws.com -u admin -p
-```
-
-Then run:
-
-```sql
-CREATE DATABASE IF NOT EXISTS cloudnotes;
-USE cloudnotes;
-
-CREATE TABLE IF NOT EXISTS notes (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  title VARCHAR(255) NOT NULL,
-  content TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
----
-
-## 🚀 Deploying to EC2 with your own domain + HTTPS
-
-This is the production-style deployment used in the video. The app runs on `https://www.aws365.shop` with a real Let's Encrypt certificate. Replace `aws365.shop` with your own domain throughout.
-
-### Architecture
-
-```
-        ┌──────────────────────────────────────────────────┐
-        │  Internet                                        │
-        └──────────────────┬───────────────────────────────┘
-                           │ HTTPS (443)
-                           ▼
-        ┌──────────────────────────────────────────────────┐
-        │  EC2 Instance (Ubuntu 22.04)                     │
-        │                                                  │
-        │  Host Nginx ── SSL termination (certbot)         │
-        │      │                                           │
-        │      ├──▶ 127.0.0.1:3000  ── frontend container  │
-        │      └──▶ 127.0.0.1:5000  ── backend container   │
-        │                                  │               │
-        └──────────────────────────────────┼───────────────┘
-                                           │ 3306 (private)
-                                           ▼
-                                  ┌────────────────┐
-                                  │ Amazon RDS     │
-                                  │ MySQL 8.0      │
-                                  └────────────────┘
-```
-
-The host Nginx terminates SSL and reverse-proxies to the containers, which are bound to `127.0.0.1` only — they are never directly reachable from the internet.
-
-### Step 1: Launch EC2
-
-- AMI: **Ubuntu 22.04** (the setup script targets Ubuntu)
-- Instance type: `t2.micro` is fine for the demo
-- Security group `ec2-cloudnotes-sg`: open **22** (your IP only), **80**, **443**
-- **Add this EC2 security group as an inbound source on the RDS security group**
-- Allocate an **Elastic IP** and associate it with the instance (so it doesn't change on reboot)
-
-### Step 2: Point your domain at the EC2 box
-
-In **Route 53** (or your DNS provider), create two `A` records pointing at the Elastic IP:
-
-| Record name        | Type | Value                  |
-| ------------------ | ---- | ---------------------- |
-| `aws365.shop`      | A    | Your EC2 Elastic IP    |
-| `www.aws365.shop`  | A    | Your EC2 Elastic IP    |
-
-Wait a couple of minutes and verify:
-
-```bash
-dig +short www.aws365.shop
-# Should return your EC2 IP
-```
-
-Certbot will fail to issue a certificate if DNS isn't pointing correctly yet, so don't skip this step.
-
-### Step 3: Clone the repo and configure
-
-SSH into the EC2 box, then:
-
-```bash
-git clone <your-repo-url>
-cd cloud-notes-app
-
-cp .env.example .env
-nano .env   # Fill in your RDS endpoint and credentials
-```
-
-### Step 4: Edit the setup script
-
-Open `deploy/ec2-setup.sh` and change two things at the top:
-
-```bash
-EMAIL="your-email@example.com"   # Let's Encrypt notifications go here
-# Change DOMAIN and WWW_DOMAIN if not using aws365.shop
-```
-
-### Step 5: Run the setup script
-
-```bash
-chmod +x deploy/ec2-setup.sh
-sudo ./deploy/ec2-setup.sh
-```
-
-This installs Docker, Nginx, certbot, brings up the containers, requests an SSL cert covering both `aws365.shop` and `www.aws365.shop`, redirects the apex to www, and enables automatic certificate renewal.
-
-The script is idempotent — safe to run again if something fails halfway.
-
-### Step 6: Visit your site
-
-🎉 **https://www.aws365.shop** — secured with Let's Encrypt SSL, served by host Nginx, app running in Docker, data living in Amazon RDS.
-
-### Verifying the setup
-
-```bash
-# Container health
-docker compose ps
-docker compose logs -f
-
-# Host Nginx
-sudo nginx -t                          # config syntax check
-sudo systemctl status nginx
-sudo tail -f /var/log/nginx/cloudnotes.access.log
-
-# SSL certificate
-sudo certbot certificates              # see issued certs
-sudo certbot renew --dry-run           # test renewal works
-curl -I https://www.aws365.shop        # should return 200 and HSTS header
-```
-
-### Updating the app later
-
-```bash
-cd ~/cloud-notes-app
-git pull
-docker compose up -d --build
-```
-
-Host Nginx and SSL don't need to be touched. The containers update in place.
-
-### Why this layout (host Nginx + containers)
-
-- **SSL renewal without rebuilding images.** Certbot edits the host Nginx config; the containers don't know or care.
-- **Multiple apps on one box.** Add a new server block in `/etc/nginx/sites-available/` for `shop.aws365.shop` or `api.aws365.shop` — same Elastic IP, same SSL workflow.
-- **Containers are private.** They bind to `127.0.0.1:3000` and `127.0.0.1:5000`. Only host Nginx can reach them. Nothing on ports 3000 or 5000 is exposed to the internet.
-- **Clean separation of concerns.** Nginx does TLS and routing. Docker does app lifecycle. RDS does data.
-
----
-
-## 📡 API reference
-
-| Method | Endpoint            | Description                          |
-| ------ | ------------------- | ------------------------------------ |
-| GET    | `/health`           | App liveness + uptime                |
-| GET    | `/api/db-status`    | RDS connection info (endpoint masked)|
-| GET    | `/api/notes`        | List all notes (newest first)        |
-| POST   | `/api/notes`        | Create a note `{ title, content }`   |
-| DELETE | `/api/notes/:id`    | Delete by ID                         |
-
-### Example requests
-
-```bash
-# Health
-curl http://localhost:5000/health
-
-# Create
-curl -X POST http://localhost:5000/api/notes \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Hello RDS","content":"My first note"}'
-
-# List
-curl http://localhost:5000/api/notes
-
-# Delete
-curl -X DELETE http://localhost:5000/api/notes/1
-```
-
----
-
-## 🔒 Security reminders
-
-These are the rules to drill into viewers:
-
-1. **Keep RDS private.** `Publicly accessible = No`. Always.
-2. **Lock the security group.** Allow port 3306 *only* from the EC2 security group ID — never `0.0.0.0/0`.
-3. **Never commit `.env`.** It's in `.gitignore` for a reason. Use AWS Secrets Manager or SSM Parameter Store in production.
-4. **Rotate the master password.** Don't use the one you typed during creation forever.
-5. **Enable encryption at rest** (RDS option) and **enforce SSL in transit** for any real workload.
-6. **Backups & Multi-AZ** are off in free tier — turn them on for anything beyond a demo.
-7. **IAM database authentication** is a great next-level topic to cover.
-
----
-
-## 🐛 Troubleshooting
-
-| Symptom                                      | Likely cause                                                          |
-| -------------------------------------------- | --------------------------------------------------------------------- |
-| `ETIMEDOUT` when starting backend            | Security group doesn't allow your IP or EC2 SG on port 3306           |
-| `ER_ACCESS_DENIED_ERROR`                     | Wrong `DB_USER` or `DB_PASSWORD` in `.env`                            |
-| `Unknown database 'cloudnotes'`              | You didn't set an initial DB name — create it manually (see SQL above)|
-| Dashboard says "Backend unreachable"         | Backend isn't running, or Vite proxy port is wrong                    |
-| `ENOTFOUND` on the RDS hostname              | Wrong endpoint in `.env`, or VPC routing issue                        |
-| `Notes table ready` never appears            | DB user doesn't have `CREATE TABLE` privilege                         |
-| `port is already allocated` on `docker compose up` | Port 80 is taken — stop the other process or change the host port |
-| Containers up but UI shows "Disconnected"    | Root `.env` not filled in, or RDS SG doesn't allow EC2 instance       |
-| `permission denied` running `docker`         | You're not in the docker group — log out and back in after `usermod`  |
-| Code changes not reflecting                  | Rebuild: `docker compose up --build --force-recreate`                 |
-
----
-
-## 📺 Watch the video
-
-This entire app is built and explained step-by-step in the **AWS Zero to Hero** series.
-
-▶️ **Subscribe:** [youtube.com/@awsandevops](https://youtube.com/@awsandevops)
-
----
-
-Built with ☁️ by **Madhukar Reddy**.
+See [troubleshooting](docs/troubleshooting.md) for common deployment failures.

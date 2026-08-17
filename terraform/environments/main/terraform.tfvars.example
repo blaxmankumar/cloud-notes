@@ -1,0 +1,24 @@
+aws_region = "us-east-1"
+
+environment  = "main"
+project_name = "aws-verified-access-zero-trust"
+
+application_domain     = "secure.lax-man.in"
+endpoint_domain_prefix = "lax-man-main"
+base_domain        = "lax-man.in"
+
+approved_email_domain             = "magnitglobal.com"
+approved_user_emails = [
+  "kumarblaxman@gmail.com",
+  "akhilydv2710@gmail.com",
+  "battulalaxmankumar314@gmail.com"
+]
+approved_identity_center_group_id = "REPLACE_ME"
+
+alert_email = "sammaxi416@gmail.com"
+
+# Phase 1: false. Change to true only after ACM is ISSUED.
+enable_verified_access = false
+
+# Required for first-boot package/container downloads. See docs/architecture.md.
+enable_nat_gateway = true

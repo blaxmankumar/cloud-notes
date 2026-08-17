@@ -1,202 +1,107 @@
-// ============================================
-// Cloud Notes App - Express Server
-// ============================================
-// Built for the AWS Zero to Hero series
-// YouTube: https://youtube.com/@awsandevops
-
 const express = require('express');
-const cors = require('cors');
 require('dotenv').config();
 
-const {
-  pool,
-  testConnection,
-  initializeDatabase,
-  getMaskedEndpoint,
-} = require('./db');
+const store = require('./db');
 
-const app = express();
-const PORT = process.env.PORT || 5000;
-
-// ============================================
-// Middleware
-// ============================================
-app.use(cors());
-app.use(express.json());
-
-// Simple request logger
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
-  next();
-});
-
-// ============================================
-// Routes
-// ============================================
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// Database status endpoint
-app.get('/api/db-status', async (req, res) => {
-  try {
-    const result = await testConnection();
-    res.json({
-      ...result,
-      endpoint: getMaskedEndpoint(),
-      database: process.env.DB_NAME || 'not-configured',
-      port: process.env.DB_PORT || 3306,
-    });
-  } catch (error) {
-    res.status(500).json({
-      connected: false,
-      error: error.message,
-    });
-  }
-});
-
-// Get all notes
-app.get('/api/notes', async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      'SELECT * FROM notes ORDER BY created_at DESC'
-    );
-    res.json({
-      success: true,
-      count: rows.length,
-      notes: rows,
-    });
-  } catch (error) {
-    console.error('Error fetching notes:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch notes',
-      message: error.message,
-    });
-  }
-});
-
-// Create a new note
-app.post('/api/notes', async (req, res) => {
-  const { title, content } = req.body;
-
-  // Validation
-  if (!title || title.trim() === '') {
-    return res.status(400).json({
-      success: false,
-      error: 'Title is required',
-    });
-  }
+function inspectVerifiedAccessContext(value) {
+  if (!value) return { context_present: false };
+  if (value.length > 16384) return { context_present: true, error: 'context_too_large' };
 
   try {
-    const [result] = await pool.query(
-      'INSERT INTO notes (title, content) VALUES (?, ?)',
-      [title.trim(), content ? content.trim() : '']
-    );
-
-    const [newNote] = await pool.query('SELECT * FROM notes WHERE id = ?', [
-      result.insertId,
-    ]);
-
-    res.status(201).json({
-      success: true,
-      note: newNote[0],
-    });
-  } catch (error) {
-    console.error('Error creating note:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create note',
-      message: error.message,
-    });
-  }
-});
-
-// Delete a note by ID
-app.delete('/api/notes/:id', async (req, res) => {
-  const { id } = req.params;
-
-  if (!id || isNaN(id)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid note ID',
-    });
-  }
-
-  try {
-    const [result] = await pool.query('DELETE FROM notes WHERE id = ?', [id]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Note not found',
-      });
+    const parts = value.split('.');
+    if (parts.length !== 3) throw new Error('not_jwt');
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    const safeClaims = {};
+    for (const key of ['sub', 'email', 'preferred_username', 'iss', 'aud', 'iat', 'exp']) {
+      if (payload[key] !== undefined) safeClaims[key] = payload[key];
     }
-
-    res.json({
-      success: true,
-      message: 'Note deleted successfully',
-    });
-  } catch (error) {
-    console.error('Error deleting note:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to delete note',
-      message: error.message,
-    });
+    return {
+      context_present: true,
+      signature_validated: false,
+      claims: safeClaims,
+      notice: 'Claims are informational until the JWT signature is validated against the Verified Access public key.',
+    };
+  } catch (_) {
+    return { context_present: true, signature_validated: false, error: 'invalid_context_format' };
   }
-});
+}
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found',
-    path: req.path,
+function createApp() {
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '32kb' }));
+
+  app.use((req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
+    next();
   });
-});
 
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error',
+  app.get('/health', (_req, res) => {
+    res.status(200).json({ status: 'healthy' });
   });
-});
 
-// ============================================
-// Start Server
-// ============================================
+  app.get('/identity', (req, res) => {
+    res.json(inspectVerifiedAccessContext(req.get('x-amzn-ava-user-context')));
+  });
+
+  app.get('/api/db-status', async (_req, res) => {
+    const result = await store.testConnection();
+    res.status(result.connected ? 200 : 503).json({
+      ...result,
+      endpoint: store.getMaskedEndpoint(),
+      database: store.mode === 'file' ? 'cloud-notes' : process.env.DB_NAME || 'not-configured',
+      port: store.mode === 'file' ? 'local' : process.env.DB_PORT || 3306,
+    });
+  });
+
+  app.get('/api/notes', async (_req, res, next) => {
+    try {
+      const notes = await store.listNotes();
+      res.json({ success: true, count: notes.length, notes });
+    } catch (error) { next(error); }
+  });
+
+  app.post('/api/notes', async (req, res, next) => {
+    const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+    const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
+    if (!title) return res.status(400).json({ success: false, error: 'Title is required' });
+    if (title.length > 255) return res.status(400).json({ success: false, error: 'Title is too long' });
+    try {
+      const note = await store.createNote(title, content);
+      return res.status(201).json({ success: true, note });
+    } catch (error) { return next(error); }
+  });
+
+  app.delete('/api/notes/:id', async (req, res, next) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ success: false, error: 'Invalid note ID' });
+    try {
+      const deleted = await store.deleteNote(id);
+      if (!deleted) return res.status(404).json({ success: false, error: 'Note not found' });
+      return res.json({ success: true, message: 'Note deleted successfully' });
+    } catch (error) { return next(error); }
+  });
+
+  app.use((req, res) => res.status(404).json({ success: false, error: 'Route not found', path: req.path }));
+  app.use((error, _req, res, _next) => {
+    console.error('Unhandled request error:', error.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  });
+  return app;
+}
+
 async function startServer() {
-  console.log('\n🚀 Starting Cloud Notes App Backend...\n');
+  await store.initializeDatabase();
+  const port = Number(process.env.PORT || 5000);
+  return createApp().listen(port, '0.0.0.0', () => console.log(`Cloud Notes listening on port ${port}`));
+}
 
-  // Test database connection
-  const dbStatus = await testConnection();
-
-  if (dbStatus.connected) {
-    console.log('✅ Connected to RDS:', getMaskedEndpoint());
-    console.log('✅ Database engine:', dbStatus.engine, dbStatus.version);
-
-    // Initialize tables
-    await initializeDatabase();
-  } else {
-    console.log('⚠️  Server starting WITHOUT database connection');
-    console.log('⚠️  Reason:', dbStatus.error);
-    console.log('⚠️  Check your .env file and RDS security group rules');
-  }
-
-  app.listen(PORT, () => {
-    console.log(`\n✅ Server running on http://localhost:${PORT}`);
-    console.log(`✅ Health check: http://localhost:${PORT}/health`);
-    console.log(`✅ DB Status:    http://localhost:${PORT}/api/db-status\n`);
+if (require.main === module) {
+  startServer().catch((error) => {
+    console.error('Application startup failed:', error.message);
+    process.exit(1);
   });
 }
 
-startServer();
+module.exports = { createApp, inspectVerifiedAccessContext, startServer };

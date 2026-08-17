@@ -5,20 +5,20 @@
 # Final image is tiny (~25MB) and production-ready
 
 # ---------- Stage 1: Build ----------
-FROM node:20-alpine AS builder
+FROM node:20.19.5-alpine AS builder
 
 WORKDIR /app
 
 # Copy package files first for better caching
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 # Copy source and build
 COPY . .
 RUN npm run build
 
 # ---------- Stage 2: Serve ----------
-FROM nginx:alpine
+FROM nginx:1.28.0-alpine
 
 # Copy built static files from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
