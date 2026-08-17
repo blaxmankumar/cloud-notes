@@ -103,7 +103,7 @@ jobs:
           scan-ref: .
           scanners: secret
           exit-code: "1"
-          version: 0.72.0
+          version: v0.72.0
       - name: Trivy IaC scan
         uses: aquasecurity/trivy-action@0.35.0
         with:
@@ -111,7 +111,7 @@ jobs:
           scan-ref: .
           scanners: misconfig
           exit-code: "0"
-          version: 0.72.0
+          version: v0.72.0
 
   plan:
     if: vars.AWS_PLAN_ROLE_ARN != '' && vars.TF_STATE_BUCKET != ''
